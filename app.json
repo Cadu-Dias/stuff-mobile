@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "stuff-mobile",
+    "name": "Stuff",
     "slug": "stuff-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -18,9 +18,10 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#F3A64E"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.cadub.stuffmobile"
     },
     "web": {
       "favicon": "./assets/favicon.png"
