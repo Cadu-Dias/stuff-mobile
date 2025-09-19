@@ -1,10 +1,13 @@
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { BluetoothDevice } from "react-native-bluetooth-classic";
+import { RfidStatusItem } from "./rfids/rfidStatusItem";
 
 type RootStackParamList = {
-    Home: undefined;
+    Login: undefined;
+    MainTabs: undefined;
+    OrganizationDetail: { organizationId: string }
     DeviceDiscovery: undefined; 
-    StorageScan: { device: BluetoothDevice };
+    StorageScan: { deviceAddress: string };
+    ResultsScreen: { results: RfidStatusItem[], deviceAddress: string };
 };
 
 export type RootStackNavigationProp = NativeStackNavigationProp<RootStackParamList>;

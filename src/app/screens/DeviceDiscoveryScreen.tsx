@@ -1,141 +1,166 @@
-import React, { useEffect } from 'react';
-import useBLE from "../hooks/useBle";
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  FlatList,
   SafeAreaView,
-  StyleSheet,
-  Text,
   View,
+  Text,
+  FlatList,
   TouchableOpacity,
-  ActivityIndicator
+  StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { BluetoothDevice } from 'react-native-bluetooth-classic';
-import { useNavigation } from '@react-navigation/native';
+import { Feather } from '@expo/vector-icons';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { RootStackNavigationProp } from '../models/stackType';
+import useBLE from '../hooks/useBle';
+import { BluetoothDevice } from 'react-native-bluetooth-classic';
 
-const DeviceItem = ({ device, onConnect }: { device: BluetoothDevice, onConnect: () => Promise<void> }) => {
-  return (
-    <View style={styles.deviceItem}>
-      <View style={styles.deviceInfo}>
-        <MaterialCommunityIcons name="bluetooth" size={24} color="#333" />
-        <Text style={styles.deviceName} numberOfLines={1} ellipsizeMode="tail">
-          {device.name || 'Dispositivo Desconhecido'}
-        </Text>
-      </View>
-      <TouchableOpacity style={styles.connectButton} onPress={onConnect}>
-        <Text style={styles.connectButtonText}>Conectar</Text>
-      </TouchableOpacity>
-    </View>
+const DeviceDiscoveryScreen = () => {
+  const navigation = useNavigation<RootStackNavigationProp>();
+
+  const {
+    allDevices,
+    isDiscovering,
+    scanForPeripherals,
+    connectToDevice,
+    connectedDevice,
+    cancelDiscovery,
+  } = useBLE();
+
+  const [connectingTo, setConnectingTo] = useState<BluetoothDevice | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (isDiscovering && !connectedDevice) {
+          console.log('Tela perdeu o foco sem conexão, cancelando a busca de dispositivos.');
+          cancelDiscovery();
+        }
+      };
+    }, [isDiscovering, connectedDevice, cancelDiscovery])
   );
-};
-
-const LoadingModal = () => {
-  return (
-    <View style={styles.loadingModal}>
-      <ActivityIndicator size="large" color="#FFA500" />
-      <Text style={styles.loadingText}>Detectando Dispositivos...</Text>
-    </View>
-  );
-};
-
-
-const DeviceDiscovery = () => {
-  const { scanForPeripherals, allDevices } = useBLE();
-  const navigator = useNavigation<RootStackNavigationProp>();
 
   useEffect(() => {
-    scanForPeripherals();
-  }, []);
+    let navigationTimeout: NodeJS.Timeout | null = null;
+    if (connectedDevice) {
+      console.log('Dispositivo conectado! Redirecionando em 2 segundos...');
+      navigationTimeout = setTimeout(() => {
+        navigation.navigate('StorageScan', { deviceAddress: connectedDevice.address });
+      }, 2000);
+    }
+    return () => {
+      if (navigationTimeout) {
+        clearTimeout(navigationTimeout);
+      }
+    };
+  }, [connectedDevice, navigation]);
 
-  const handleConnect = (device: BluetoothDevice) => {
-    navigator.navigate("StorageScan", { device: device });
+  const handleConnectPress = async (device: BluetoothDevice) => {
+    if (connectingTo || connectedDevice) return;
+
+    setConnectingTo(device);
+    try {
+      await connectToDevice(device.address);
+    } catch (error) {
+      console.error("Falha ao conectar:", error);
+    } finally {
+      setConnectingTo(null);
+    }
   };
 
+  const renderDeviceItem = ({ item }: { item: BluetoothDevice }) => {
+    const isConnecting = connectingTo?.id === item.id;
+    const isConnected = connectedDevice?.id === item.id;
+
+    return (
+      <TouchableOpacity
+        style={styles.deviceItem}
+        onPress={() => handleConnectPress(item)}
+        disabled={isConnecting || isConnected}
+      >
+        <View style={styles.deviceIconWrapper}>
+          <Feather name="bluetooth" size={24} color="#F89F3C" />
+        </View>
+        <View style={styles.deviceInfo}>
+          <Text style={styles.deviceName}>{item.name || 'Dispositivo Sem Nome'}</Text>
+          <Text style={styles.deviceAddress}>{item.address}</Text>
+        </View>
+        <View style={styles.deviceAction}>
+          {isConnecting ? (
+            <ActivityIndicator size="small" color="#F89F3C" />
+          ) : isConnected ? (
+            <Feather name="check-circle" size={24} color="#4CAF50" />
+          ) : (
+            <Feather name="chevron-right" size={24} color="#ccc" />
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <Feather name="search" size={40} color="#ccc" />
+      <Text style={styles.emptyText}>
+        {isDiscovering
+          ? 'Procurando por dispositivos...'
+          : 'Nenhum dispositivo encontrado.\nToque em "Procurar" para iniciar.'}
+      </Text>
+    </View>
+  );
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.devicesWrapper}>
-        <Text style={styles.title}>Dispositivos Encontrados:</Text>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.main}>
+        <View style={styles.headerContainer}>
+          <Text style={styles.title}>Conectar ao Leitor</Text>
+          <Text style={styles.subtitle}>
+            Pressione o botão para encontrar leitores RFID próximos.
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.scanButton, isDiscovering && styles.scanButtonDisabled]}
+          onPress={scanForPeripherals}
+          disabled={isDiscovering}
+        >
+          <Feather name={isDiscovering ? 'loader' : 'search'} size={20} color="white" />
+          <Text style={styles.scanButtonText}>
+            {isDiscovering ? 'Procurando...' : 'Procurar Dispositivos'}
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.divider} />
+
         <FlatList
           data={allDevices}
+          renderItem={renderDeviceItem}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <DeviceItem device={item} onConnect={async () => handleConnect(item)} />
-          )}
-          contentContainerStyle={styles.flatListContent}
+          ListEmptyComponent={renderEmptyState}
+          contentContainerStyle={{ flexGrow: 1 }}
         />
       </View>
-      
-      {allDevices.length === 0 && <LoadingModal />}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  devicesWrapper: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    paddingVertical: 20,
-    color: '#333',
-    paddingHorizontal: 20,
-  },
-  deviceItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 15,
-    marginVertical: 8,
-    marginHorizontal: 15,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  deviceInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  deviceName: {
-    marginLeft: 10,
-    fontSize: 16,
-    color: '#333',
-    flex: 1,
-  },
-  connectButton: {
-    backgroundColor: '#FFA500',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-  },
-  connectButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  loadingModal: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(245, 245, 245, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: 18,
-    color: '#666',
-    marginTop: 10,
-  },
-  flatListContent: {
-    paddingHorizontal: 5,
-  },
+  safeArea: { flex: 1, backgroundColor: '#F4A64E' },
+  main: { flex: 1, backgroundColor: '#FFF0E0', margin: 12, borderRadius: 8, padding: 20 },
+  headerContainer: { alignItems: 'center', marginBottom: 20 },
+  title: { fontSize: 24, fontWeight: 'bold', color: '#333' },
+  subtitle: { fontSize: 16, color: '#666', textAlign: 'center', marginTop: 5 },
+  scanButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F89F3C', paddingVertical: 15, borderRadius: 12, elevation: 3, gap: 10 },
+  scanButtonDisabled: { backgroundColor: '#FFC685' },
+  scanButtonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
+  divider: { height: 1, backgroundColor: '#E0D2C2', marginVertical: 20 },
+  deviceItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', padding: 15, borderRadius: 10, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
+  deviceIconWrapper: { backgroundColor: '#FFF0E0', padding: 10, borderRadius: 20, marginRight: 15 },
+  deviceInfo: { flex: 1 },
+  deviceName: { fontSize: 16, fontWeight: '600', color: '#333' },
+  deviceAddress: { fontSize: 12, color: '#888', marginTop: 2 },
+  deviceAction: { paddingLeft: 10 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { marginTop: 15, fontSize: 16, color: '#aaa', textAlign: 'center' },
 });
 
-export default DeviceDiscovery;
+export default DeviceDiscoveryScreen;
