@@ -1,5 +1,8 @@
-import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, SafeAreaView, ScrollView, Platform } from 'react-native';
+import { OrganizationService } from '../services/organization.service';
+import { AssetService } from '../services/asset.service';
 
 const themeColors = {
   background: '#F4A64E',
@@ -12,31 +15,68 @@ const themeColors = {
 };
 
 const HomeScreen = () => {
-  const user = {
-    firstName: 'Cadu',
-  };
+
+  const organizationService = new OrganizationService();
+  const assetService = new AssetService();
+
+  const [userData, setUserData] = useState<{ firstName: string; lastName: string; username: string } | null>(null);
+  const [organizationsNum, setOrganizationNum] = useState<number>(0);
+  const [assetsNum, setAssetsNum] = useState<number>(0); 
+
+  const loadAsynContent = async () => {
+    const [storedData, organizationNumber, assetsNumber] = await Promise.all([
+      AsyncStorage.getItem('userData'),
+      AsyncStorage.getItem("organizationNumber"),
+      AsyncStorage.getItem("assetsNumber")
+    ]);
+    
+    if (storedData) {
+      setUserData(JSON.parse(storedData));
+    }
+    
+    if(organizationNumber !== null && organizationNumber !== undefined) setOrganizationNum(Number(organizationNumber))
+    else {
+      const organizations = await organizationService.getAllOrganizations();
+      setOrganizationNum(organizations.length);
+      await AsyncStorage.setItem("organizationNumber", String(organizations.length))
+    }
+
+    if(assetsNumber !== null) setAssetsNum(Number(assetsNumber));
+    else {
+      const assets = (await assetService.getAssets()).assets;
+      const assetsQuantityArray = assets.map((value) => value.quantity || 0)
+      const assetsNumber = assetsQuantityArray.reduce((prev, cur) => prev + cur);
+
+      setAssetsNum(assetsNumber)
+      await AsyncStorage.setItem("assetsNumber", String(assetsNumber))
+    }
+  }
+
+  useEffect(() => {
+    loadAsynContent();
+  }, [])
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <ScrollView contentContainerStyle={styles.main}>
           <Text style={styles.h1}>
-            Seu painel{user && user.firstName ? `, ${user.firstName}!` : ""}
+            Seu painel{userData && userData.firstName ? `, ${userData.firstName}!` : ""}
           </Text>
           <Text style={styles.p}>Acompanhe tudo de um lugar só</Text>
 
           <View style={styles.cards}>
             <View style={styles.card}>
               <Text style={styles.h3}>Ativos Cadastrados</Text>
-              <Text style={styles.cardSpan}>152</Text>
+              <Text style={styles.cardSpan}>{assetsNum}</Text>
             </View>
             <View style={styles.card}>
               <Text style={styles.h3}>Organizações</Text>
-              <Text style={styles.cardSpan}>12</Text>
+              <Text style={styles.cardSpan}>{organizationsNum}</Text>
             </View>
             <View style={styles.card}>
-              <Text style={styles.h3}>Últimos Acessos</Text>
-              <Text style={styles.cardSpan}>09/05/2025</Text>
+              <Text style={styles.h3}>Último Acesso</Text>
+              <Text style={styles.cardSpan}>19/09/2025</Text>
             </View>
           </View>
         </ScrollView>
