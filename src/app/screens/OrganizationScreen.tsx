@@ -5,21 +5,18 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { organizationService } from '../services/organization.service';
+import { OrganizationService } from '../services/organization.service';
 import { RootStackNavigationProp } from '../models/stackType';
-
-interface Organization {
-  id: string; name: string; slug: string; description: string;
-}
+import { Organization } from '../models/organization.model';
 
 type OrgModal = {
-    visible: boolean;
-    onClose: () => void;
-    onSubmit: (form: { name: string; description: string; slug: string }) => Promise<void>;
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (form: { name: string; description: string; slug: string, password: string }) => Promise<void>;
 }
 
 const CreateOrgModal = ({ visible, onClose, onSubmit } : OrgModal) => {
-  const [form, setForm] = useState({ name: "", description: "", slug: "" });
+  const [form, setForm] = useState({ name: "", description: "", slug: "", password: "" });
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
@@ -55,8 +52,6 @@ const CreateOrgModal = ({ visible, onClose, onSubmit } : OrgModal) => {
   );
 };
 
-
-// Tela Principal
 export default function OrganizationsScreen() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,12 +60,14 @@ export default function OrganizationsScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const navigation = useNavigation<RootStackNavigationProp>();
 
+  const organizationService = new OrganizationService();
+
   const fetchAllOrganizations = async () => {
     setLoading(true);
     setErrorMsg("");
     try {
       const response = await organizationService.getAllOrganizations();
-      setOrganizations(response.data || []);
+      setOrganizations(response || []);
     } catch (err) {
       setErrorMsg("Erro ao buscar organizações.");
     } finally {
@@ -78,19 +75,18 @@ export default function OrganizationsScreen() {
     }
   };
 
-  // useFocusEffect é como useEffect, mas roda toda vez que a tela entra em foco
   useFocusEffect(
     useCallback(() => {
       fetchAllOrganizations();
     }, [])
   );
 
-  const handleCreateOrg = async (form : {name: string; description: string; slug: string }) => {
+  const handleCreateOrg = async (form : {name: string; description: string; slug: string, password: string }) => {
     try {
       await organizationService.createOrganization(form);
       setSuccessMsg("Organização criada com sucesso!");
       setShowCreateModal(false);
-      await fetchAllOrganizations(); // Re-busca a lista
+      await fetchAllOrganizations();
     } catch (err) {
       setErrorMsg("Erro ao criar organização.");
     }
@@ -131,7 +127,7 @@ export default function OrganizationsScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.main}>
-        {/* Header da Tela */}
+
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>Minhas Organizações</Text>
@@ -143,11 +139,9 @@ export default function OrganizationsScreen() {
           </View>
         </View>
 
-        {/* Mensagens de Feedback */}
         {successMsg && <Text style={styles.successMessage}>{successMsg}</Text>}
         {errorMsg && <Text style={styles.errorMessage}>{errorMsg}</Text>}
 
-        {/* Lista */}
         {loading && !organizations.length ? (
           <ActivityIndicator size="large" color="#F4A64E" style={{ marginTop: 20 }} />
         ) : (
@@ -185,7 +179,7 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#F4A64E' },
   modalBody: { marginBottom: 20 },
-  input: { backgroundColor: '#fff', padding: 12, borderRadius: 8, fontSize: 16, marginBottom: 10, borderWidth: 1, borderColor: '#ddd' },
+  input: { backgroundColor: '#fff', color: 'rgb(0,0,0)', padding: 12, borderRadius: 8, fontSize: 16, marginBottom: 10, borderWidth: 1, borderColor: '#ddd' },
   modalFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
   button: { backgroundColor: '#F89F3C', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8 },
   dangerButton: { backgroundColor: '#C62828' },
