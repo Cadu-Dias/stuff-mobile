@@ -28,13 +28,10 @@ export class OrganizationService {
       const accessToken = await AsyncStorage.getItem("accessToken");
       if (!accessToken) throw new Error("Usuário não autenticado!");
 
-      const response = await fetch(
-        `${this.apiUrl}/organizations/${identifier}`,
-        {
-          method: "GET",
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }
-      );
+      const response = await fetch(`${this.apiUrl}/organizations/${identifier}`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
 
       const responseJson = await response.json() as { data: Organization };
       return responseJson.data;
@@ -98,7 +95,11 @@ export class OrganizationService {
       `${this.apiUrl}/organizations/${orgId}/members`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: { 
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}` 
+        },
         body: JSON.stringify(member),
       }
     );
@@ -115,7 +116,11 @@ export class OrganizationService {
       `${this.apiUrl}/organizations/${orgId}/members/${userId}`,
       {
         method: "PATCH",
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: { 
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}` 
+        },
         body: JSON.stringify({ role }),
       }
     );

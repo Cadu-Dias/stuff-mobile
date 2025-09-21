@@ -8,9 +8,11 @@ import {
   TextInput,
   ScrollView,
   Platform,
+  Alert,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { UserService } from '../services/user.service';
 
 const themeColors = {
   background: '#F4A64E',
@@ -57,6 +59,8 @@ const EditableInput = ({ label, iconName, value, onChangeText, placeholder, name
 
 export default function Profile() {
 
+  const userService = new UserService();
+
   // Lógica de estado (sem alterações)
   const [userData, setUserData] = useState<{ firstName: string; lastName: string; username: string } | null>(null)
   const [formData, setFormData] = useState({
@@ -96,6 +100,25 @@ export default function Profile() {
     }));
   };
 
+  const handleUpdate = async () => {
+    try {
+      await userService.updateLoggedUser(formData);
+
+      const newUserData = { 
+        username: formData.userName, 
+        firstName: formData.firstName, 
+        lastName: formData.lastName 
+      }
+
+      await AsyncStorage.setItem("userData", JSON.stringify(newUserData))
+      setUserData(newUserData);
+      setHasEnteredEdit(false);
+
+    } catch (error) {
+      Alert.alert("Error", "Não foi possível atualizar o perfil")
+    }
+  }
+
   const handleCancel = () => {
     setHasEnteredEdit(false);
     if (userData) {
@@ -116,7 +139,6 @@ export default function Profile() {
             <Text style={styles.p}>Visualize e edite os dados do seu perfil abaixo:</Text>
           </View>
 
-          {/* ALTERAÇÃO: Trocado <Icon> por <Feather> */}
           {!hasEnteredEdit ? (
             <TouchableOpacity style={styles.button} onPress={() => setHasEnteredEdit(true)}>
               <Feather name="edit-2" size={18} color="white" />
@@ -124,7 +146,7 @@ export default function Profile() {
             </TouchableOpacity>
           ) : (
             <View style={styles.editButtons}>
-              <TouchableOpacity style={styles.button} onPress={() => console.log("Atualizando:", formData)}>
+              <TouchableOpacity style={styles.button} onPress={handleUpdate}>
                 <Feather name="save" size={18} color="white" />
                 <Text style={styles.buttonText}>Atualizar Perfil</Text>
               </TouchableOpacity>
