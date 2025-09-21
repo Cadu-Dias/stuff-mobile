@@ -137,8 +137,6 @@ function useBLE(): BluetoothLowEnergyApi {
         scannedRfids.includes(convertedData) ||
         convertedData.includes("000000");
 
-      console.log("Rfid scaneado: " + convertedData);
-
       if (!isInvalidValue) {
         setScannedRfids((prevState) => [...prevState, convertedData]);
       }

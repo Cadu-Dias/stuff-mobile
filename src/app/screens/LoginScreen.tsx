@@ -11,8 +11,12 @@ import {
     ScrollView 
 } from "react-native";
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { RootStackNavigationProp } from '../models/stackType';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { AuthService } from "../services/auth.service";
+import { UserService } from "../services/user.service";
 
 const validateEmail = (email: string) => {
     const re = /\S+@\S+\.\S+/;
@@ -26,13 +30,33 @@ const LoginScreen = () => {
     const [password, setPassword] = useState('');
     const [emailError, setEmailError] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [isLogging, setIsLogging] = useState(false);
     
     const navigator = useNavigation<RootStackNavigationProp>();
-    
-    const handleLogin = () => {
-        console.log('Login com E-mail:', email);
-        console.log('Senha:', password);
-        navigator.navigate('MainTabs'); 
+
+    const authService = new AuthService();
+    const userService = new UserService();
+
+    const handleLogin = async () => {
+        setIsLogging(true);
+
+        try {
+            await authService.loginUser({ email, password })
+            console.log('Login com E-mail:', email);
+            console.log('Senha:', password);
+
+            const userInfo = await userService.getUserInfo();
+            AsyncStorage.setItem(
+                "userData", 
+                JSON.stringify({ firstName: userInfo.firstName, lastName: userInfo.lastName, username: userInfo.userName })
+            );
+
+            setIsLogging(false);
+            navigator.navigate('MainTabs'); 
+        } catch (error) {
+            console.log(error)
+            setIsLogging(false);
+        }
     };
 
     const handleEmailChange = (text: string) => {
@@ -44,7 +68,7 @@ const LoginScreen = () => {
         }
     };
 
-    const isButtonDisabled = !email || !password || !!emailError;
+    const isButtonDisabled = !email || !password || !!emailError || isLogging;
 
     return (
         <ImageBackground 
@@ -114,7 +138,7 @@ const LoginScreen = () => {
                             onPress={handleLogin}
                             disabled={isButtonDisabled}
                         >
-                            <Text style={styles.loginButtonText}>Entrar</Text>
+                            <Text style={styles.loginButtonText}>{ isLogging ? "Entrando..." : "Entrar"}</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity style={styles.forgotPasswordButton}>

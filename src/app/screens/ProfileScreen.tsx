@@ -10,6 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const themeColors = {
   background: '#F4A64E',
@@ -24,19 +25,13 @@ const themeColors = {
 };
 
 type EditableInputProps = {
-    label: string;
-    iconName: any;
-    value: string;
-    onChangeText: (name: string, text: string) => void;
-    placeholder: string,
-    name: string
+  label: string;
+  iconName: any;
+  value: string;
+  onChangeText: (name: string, text: string) => void;
+  placeholder: string,
+  name: string
 }
-
-const user = {
-    username: "cadub",
-    firstName: "Cadu",
-    lastName: "Machado",
-};
 
 const EditableInput = ({ label, iconName, value, onChangeText, placeholder, name } : EditableInputProps) => {
   const [isFocused, setIsFocused] = useState(false);
@@ -63,22 +58,36 @@ const EditableInput = ({ label, iconName, value, onChangeText, placeholder, name
 export default function Profile() {
 
   // Lógica de estado (sem alterações)
+  const [userData, setUserData] = useState<{ firstName: string; lastName: string; username: string } | null>(null)
   const [formData, setFormData] = useState({
     userName: "",
     firstName: "",
     lastName: "",
   });
+
   const [hasEnteredEdit, setHasEnteredEdit] = useState(false);
 
   useEffect(() => {
-    if (user) {
+    const loadUserData = async () => {
+      const storedData = await AsyncStorage.getItem('userData');
+      if (storedData) {
+        setUserData(JSON.parse(storedData));
+      }
+    }
+
+    loadUserData();
+  }, []);
+
+  useEffect(() => {
+    if (userData) {
       setFormData({
-        userName: user.username || "",
-        firstName: user.firstName || "",
-        lastName: user.lastName || "",
+        userName: userData.username || "",
+        firstName: userData.firstName || "",
+        lastName: userData.lastName || "",
       });
     }
-  }, [user]);
+
+  }, [userData]);
 
   const handleChange = (name: string, value: string) => {
     setFormData(prev => ({
@@ -89,12 +98,12 @@ export default function Profile() {
 
   const handleCancel = () => {
     setHasEnteredEdit(false);
-    if (user) {
-        setFormData({
-            userName: user.username || "",
-            firstName: user.firstName || "",
-            lastName: user.lastName || "",
-        });
+    if (userData) {
+      setFormData({
+        userName: userData.username || "",
+        firstName: userData.firstName || "",
+        lastName: userData.lastName || "",
+      });
     }
   }
 
@@ -103,7 +112,7 @@ export default function Profile() {
       <ScrollView style={styles.main}>
         <View style={styles.mainTop}>
           <View style={styles.mainTopTexts}>
-            <Text style={styles.h1}>Seu perfil{user?.firstName ? `, ${user.firstName}!` : ""}</Text>
+            <Text style={styles.h1}>Seu perfil{userData?.firstName ? `, ${userData.firstName}!` : ""}</Text>
             <Text style={styles.p}>Visualize e edite os dados do seu perfil abaixo:</Text>
           </View>
 
@@ -158,12 +167,12 @@ export default function Profile() {
           <View style={styles.mainInfo}>
             <View style={styles.mainInfoContainer}>
               <Feather name="user" style={styles.mainInfoIcon} />
-              <Text style={styles.infoH2}>{user?.username}</Text>
+              <Text style={styles.infoH2}>{userData?.username}</Text>
               <Text style={styles.infoH3}>Nome de Usuário</Text>
             </View>
             <View style={styles.mainInfoContainer}>
               <Feather name="credit-card" style={styles.mainInfoIcon} />
-              <Text style={styles.infoH2}>{user?.firstName} {user?.lastName}</Text>
+              <Text style={styles.infoH2}>{userData?.firstName} {userData?.lastName}</Text>
               <Text style={styles.infoH3}>Nome Completo</Text>
             </View>
           </View>
