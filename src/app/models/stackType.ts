@@ -4,10 +4,7 @@ import { RfidStatusItem } from "./rfids/rfidStatusItem";
 type RootStackParamList = {
     Login: undefined;
     MainTabs: undefined;
-    OrganizationDetail: { organizationId: string };
-    AssetDetails: { assetId: string };
-    AttributeDetails: { attributeId: string, assetId: string };
-    QrCodeScan: undefined;
+    OrganizationDetail: { organizationId: string }
     DeviceDiscovery: undefined; 
     StorageScan: { deviceAddress: string };
     ResultsScreen: { results: RfidStatusItem[], deviceAddress: string };
