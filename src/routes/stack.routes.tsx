@@ -8,7 +8,10 @@ import HeaderTitle from '../app/components/Header';
 type RootStackParamList = {
     Login: undefined;
     MainTabs: undefined;
-    OrganizationDetail: { organizationId: string }
+    OrganizationDetail: { organizationId: string };
+    AssetDetails: { assetId: string };
+    AttributeDetails: { attributeId: string; assetId: string };
+    QrCodeScan: undefined;
     DeviceDiscovery: undefined; 
     StorageScan: { device: BluetoothDevice };
     ResultsScreen: { results: RfidStatusItem[] };
@@ -36,11 +39,23 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
       screen: TabRoutes,
     },
     OrganizationDetail: {
-        screen: SCREENS.OrganizationDetailScreen,
-        options: ({ route }) => ({
-            title: 'Detalhes da Organização', 
-            headerBackTitle: undefined
-        }),
+      screen: SCREENS.OrganizationDetailScreen,
+      options: () => ({
+        title: 'Detalhes da Organização', 
+        headerBackTitle: undefined
+      }),
+    },
+    AssetDetails: {
+      screen: SCREENS.AssetDetailScreen,
+      options: {}
+    },
+    AttributeDetails: {
+      screen: SCREENS.AttributeDetailScreen,
+      options: {}
+    },
+    QrCodeScan: {
+      screen: SCREENS.QRCodeReaderScreen,
+      options: {}
     },
     DeviceDiscovery: {
       screen: SCREENS.DeviceDiscovery,
