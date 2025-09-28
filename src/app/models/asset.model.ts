@@ -37,3 +37,11 @@ export interface AttributeValue {
     createdAt: string,
     updatedAt: string
 }
+
+export interface SelectedAssets {
+  organization: string;
+  assets: Array<{
+    asset_name: string;
+    rfid_tag: string;
+  }>;
+}
