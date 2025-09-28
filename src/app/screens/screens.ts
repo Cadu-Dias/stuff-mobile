@@ -6,7 +6,7 @@ import ResultsScreen from "./rfids-scan-screens/ResultsScreen";
 import ProfileScreen from "./main-screens/ProfileScreen"
 import OrganizationsScreen from "./main-screens/OrganizationScreen";
 import OrganizationDetailScreen from "./organizations-screens/OrganizationDetailScreen";
-import ScanScreen from "./rfids-scan-screens/ScanScreen";
+import ScanScreen from "./main-screens/ScanScreen";
 import QRCodeReaderScreen from "./qrcode-scan-screens/QRCodeScanScreen";
 import AssetDetailScreen from "./assets-screens/AssetDetailScreen";
 import AttributeDetailScreen from "./assets-screens/AttributeDetailScreen";
