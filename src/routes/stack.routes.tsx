@@ -1,7 +1,7 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
-import SCREENS from '../app/screens/screens';
-import { BluetoothDevice } from 'react-native-bluetooth-classic';
+import { SelectedAssets } from '../app/models/asset.model';
 import { RfidStatusItem } from '../app/models/rfids/rfidStatusItem';
+import SCREENS from '../app/screens/screens';
 import TabRoutes from './tab.routes';
 import HeaderTitle from '../app/components/Header';
 
@@ -9,12 +9,14 @@ type RootStackParamList = {
     Login: undefined;
     MainTabs: undefined;
     OrganizationDetail: { organizationId: string };
-    AssetDetails: { assetId: string };
-    AttributeDetails: { attributeId: string; assetId: string };
+    AssetDetails: { organizationId: string, assetId: string };
+    AttributeDetails: { attributeId: string, assetId: string };
     QrCodeScan: undefined;
+    RFIDScanManager: undefined;
+    AssetSelection: undefined;
     DeviceDiscovery: undefined; 
-    StorageScan: { device: BluetoothDevice };
-    ResultsScreen: { results: RfidStatusItem[] };
+    StorageScan: { deviceAddress: string, selectedAssets: SelectedAssets };
+    ResultsScreen: { results: RfidStatusItem[], deviceAddress: string, selectedAssets: SelectedAssets };
 };
 
 const RootStack = createNativeStackNavigator<RootStackParamList>({
@@ -51,6 +53,14 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
     },
     AttributeDetails: {
       screen: SCREENS.AttributeDetailScreen,
+      options: {}
+    },
+    RFIDScanManager: {
+      screen: SCREENS.RFIDScanManagerScreen,
+      options: {}
+    },
+    AssetSelection: {
+      screen: SCREENS.AssetSelectionScreen,
       options: {}
     },
     QrCodeScan: {
