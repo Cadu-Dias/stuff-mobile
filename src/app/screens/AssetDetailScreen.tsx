@@ -307,7 +307,7 @@ const AttributeItem = ({
 export default function AssetDetailScreen() {
     const route = useRoute();
     const navigation = useNavigation<RootStackNavigationProp>();
-    const { assetId } = route.params as { assetId: string };
+    const { assetId, organizationId } = route.params as { organizationId: string; assetId: string };
 
     const [asset, setAsset] = useState<Asset | null>(null);
     const [loading, setLoading] = useState(true);
@@ -324,7 +324,8 @@ export default function AssetDetailScreen() {
         setErrorMsg("");
 
         try {
-            const assetResponse = await assetService.getAssetInfo(assetId);
+            let assetResponse = await assetService.getAssetInfo(assetId);
+            assetResponse.attributes = assetResponse.attributes.filter((attribute) => attribute.organizationId === organizationId);
             setAsset(assetResponse);
         } catch (err) {
             setErrorMsg("Erro ao buscar detalhes do ativo.");
