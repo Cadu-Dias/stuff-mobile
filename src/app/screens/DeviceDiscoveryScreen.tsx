@@ -46,7 +46,7 @@ const DeviceDiscoveryScreen = () => {
     if (connectedDevice) {
       console.log('Dispositivo conectado! Redirecionando em 1 segundo...');
       navigationTimeout = setTimeout(async () => {
-        await AsyncStorage.setItem("device-address", connectedDevice.address);
+        await AsyncStorage.setItem("device-info", JSON.stringify({  name: connectedDevice.name, address: connectedDevice.address }));
         navigation.navigate('RFIDScanManager');
       }, 1000);
     }

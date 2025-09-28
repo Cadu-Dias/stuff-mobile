@@ -226,7 +226,7 @@ const HomeScreen = () => {
                 description="Conecte ao leitor RFID"
                 icon="bluetooth"
                 color="#2196F3"
-                onPress={() => navigation.navigate('DeviceDiscovery')}
+                onPress={() => navigation.navigate('RFIDScanManager')}
               />
               <QuickActionCard
                 title="Criar Organização"

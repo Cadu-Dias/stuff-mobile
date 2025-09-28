@@ -11,18 +11,20 @@ import { SelectedAssets } from '../models/asset.model';
 
 const RFIDScanManagerScreen = () => {
   const navigation = useNavigation<RootStackNavigationProp>();
-  const [deviceAddress, setDeviceAddress] = useState<string | null>(null);
+  const [deviceInfo, setDeviceInfoAddress] = useState<{ name : string; address: string } | null>(null);
   const [selectedAssets, setSelectedAssets] = useState<SelectedAssets | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadStoredData = async () => {
     try {
-      const [storedDeviceAddress, storedAssets] = await Promise.all([
-        AsyncStorage.getItem('device-address'),
+      const [deviceInfo, storedAssets] = await Promise.all([
+        AsyncStorage.getItem('device-info'),
         AsyncStorage.getItem('selected-rfid-assets')
       ]);
 
-      setDeviceAddress(storedDeviceAddress);
+      if(deviceInfo) {
+        setDeviceInfoAddress(JSON.parse(deviceInfo));
+      }
       
       if (storedAssets) {
         setSelectedAssets(JSON.parse(storedAssets));
@@ -49,19 +51,19 @@ const RFIDScanManagerScreen = () => {
   };
 
   const handleStartScan = () => {
-    if (!deviceAddress || !selectedAssets) return;
+    if (!deviceInfo || !selectedAssets) return;
     
     // Navegar para tela de scan com os dados necessários
     navigation.navigate('StorageScan', { 
-      deviceAddress,
+      deviceAddress: deviceInfo.address,
       selectedAssets 
     });
   };
 
   const handleClearDevice = async () => {
     try {
-      await AsyncStorage.removeItem('device-address');
-      setDeviceAddress(null);
+      await AsyncStorage.removeItem('device-info');
+      setDeviceInfoAddress(null);
     } catch (error) {
       console.error('Erro ao limpar dispositivo:', error);
     }
@@ -76,7 +78,7 @@ const RFIDScanManagerScreen = () => {
     }
   };
 
-  const canStartScan = deviceAddress && selectedAssets && selectedAssets.assets.length > 0;
+  const canStartScan = deviceInfo?.address && selectedAssets && selectedAssets.assets.length > 0;
 
   const renderHeader = () => (
     <View style={styles.headerSection}>
@@ -97,21 +99,21 @@ const RFIDScanManagerScreen = () => {
           <MaterialCommunityIcons name="bluetooth" size={20} color="#2196F3" />
         </View>
         <Text style={styles.sectionTitle}>Dispositivo RFID</Text>
-        {deviceAddress && (
+        {deviceInfo && (
           <TouchableOpacity onPress={handleClearDevice} style={styles.clearButton}>
             <Feather name="x" size={16} color="#F44336" />
           </TouchableOpacity>
         )}
       </View>
 
-      {deviceAddress ? (
+      {deviceInfo ? (
         <View style={styles.deviceCard}>
           <View style={styles.deviceIcon}>
             <Feather name="bluetooth" size={24} color="#4CAF50" />
           </View>
           <View style={styles.deviceInfo}>
-            <Text style={styles.deviceName}>Dispositivo Conectado</Text>
-            <Text style={styles.deviceAddress}>{deviceAddress}</Text>
+            <Text style={styles.deviceName}>{deviceInfo.name}</Text>
+            <Text style={styles.deviceAddress}>{deviceInfo.address}</Text>
           </View>
           <View style={styles.statusIndicator}>
             <View style={styles.connectedDot} />
