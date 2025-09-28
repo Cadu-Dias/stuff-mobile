@@ -13,10 +13,10 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { RootStackNavigationProp } from '../models/stackType';
+import { RootStackNavigationProp } from '../../models/stackType';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { AuthService } from "../services/auth.service";
-import { UserService } from "../services/user.service";
+import { AuthService } from "../../services/auth.service";
+import { UserService } from "../../services/user.service";
 
 const validateEmail = (email: string) => {
     const re = /\S+@\S+\.\S+/;

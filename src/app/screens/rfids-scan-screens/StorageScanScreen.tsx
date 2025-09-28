@@ -14,21 +14,15 @@ import {
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { RootStackNavigationProp } from '../models/stackType';
-import useBLE from '../hooks/useBle';
-import { RfidStatusItem } from '../models/rfids/rfidStatusItem';
+import { RootStackNavigationProp } from '../../models/stackType';
+import useBLE from '../../hooks/useBle';
+import { RfidStatusItem } from '../../models/rfids/rfidStatusItem';
+import { SelectedAssets } from '../../models/asset.model';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-interface SelectedAssets {
-  organization: string;
-  assets: Array<{
-    asset_name: string;
-    rfid_tag: string;
-  }>;
-}
 
 type StorageScanScreenProps = {
   route: { 
@@ -52,7 +46,6 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Converte os selectedAssets para o formato RfidStatusItem[]
   const [rfidStatusList, setRfidStatusList] = useState<RfidStatusItem[]>(() => {
     if (selectedAssets && selectedAssets.assets) {
       return selectedAssets.assets.map(asset => ({

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { UserService } from '../services/user.service';
+import { UserService } from '../../services/user.service';
 
 const themeColors = {
   background: '#F4A64E',

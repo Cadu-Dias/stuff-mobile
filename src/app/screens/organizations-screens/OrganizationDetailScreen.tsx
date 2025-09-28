@@ -5,12 +5,12 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
-import { OrganizationService } from '../services/organization.service';
-import { AssetService } from '../services/asset.service';
-import { Asset } from '../models/asset.model';
-import { Organization } from '../models/organization.model';
-import { UserInfo } from '../models/user.model';
-import { RootStackNavigationProp } from '../models/stackType';
+import { OrganizationService } from '../../services/organization.service';
+import { AssetService } from '../../services/asset.service';
+import { Asset } from '../../models/asset.model';
+import { Organization } from '../../models/organization.model';
+import { UserInfo } from '../../models/user.model';
+import { RootStackNavigationProp } from '../../models/stackType';
 
 type TabType = 'members' | 'assets';
 

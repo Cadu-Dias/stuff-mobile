@@ -2,8 +2,8 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { RootStackNavigationProp } from '../models/stackType';
-import { RfidStatusItem } from '../models/rfids/rfidStatusItem';
+import { RootStackNavigationProp } from '../../models/stackType';
+import { RfidStatusItem } from '../../models/rfids/rfidStatusItem';
 import Svg, { Circle, Text as SvgText } from 'react-native-svg';
 
 // Nova paleta de cores

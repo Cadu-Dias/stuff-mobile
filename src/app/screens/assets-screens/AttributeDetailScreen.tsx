@@ -6,8 +6,8 @@ import {
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
-import { AttributeService } from '../services/attribute.service';
-import { AttributeDetail, AttributeValue } from '../models/asset.model';
+import { AttributeService } from '../../services/attribute.service';
+import { AttributeDetail, AttributeValue } from '../../models/asset.model';
 
 
 interface EditModalProps {

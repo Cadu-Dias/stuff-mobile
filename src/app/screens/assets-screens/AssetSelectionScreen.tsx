@@ -6,12 +6,12 @@ import {
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { OrganizationService } from '../services/organization.service';
-import { AssetService } from '../services/asset.service';
-import { Organization } from '../models/organization.model';
-import { Asset, AttributeDetail } from '../models/asset.model';
-import { RootStackNavigationProp } from '../models/stackType';
-import { AttributeService } from '../services/attribute.service';
+import { OrganizationService } from '../../services/organization.service';
+import { AssetService } from '../../services/asset.service';
+import { Organization } from '../../models/organization.model';
+import { Asset, AttributeDetail } from '../../models/asset.model';
+import { RootStackNavigationProp } from '../../models/stackType';
+import { AttributeService } from '../../services/attribute.service';
 
 interface AssetWithRFID {
     id: string;

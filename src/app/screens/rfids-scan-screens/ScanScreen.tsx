@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, SafeAreaView, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
-import { RootStackNavigationProp } from '../models/stackType';
-import useBLE from '../hooks/useBle';
+import { RootStackNavigationProp } from '../../models/stackType';
+import useBLE from '../../hooks/useBle';
 
 const ScanScreen = () => {
     const navigation = useNavigation<RootStackNavigationProp>();

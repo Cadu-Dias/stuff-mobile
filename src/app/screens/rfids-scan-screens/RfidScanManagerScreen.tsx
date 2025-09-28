@@ -6,8 +6,8 @@ import {
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { RootStackNavigationProp } from '../models/stackType';
-import { SelectedAssets } from '../models/asset.model';
+import { RootStackNavigationProp } from '../../models/stackType';
+import { SelectedAssets } from '../../models/asset.model';
 
 const RFIDScanManagerScreen = () => {
   const navigation = useNavigation<RootStackNavigationProp>();

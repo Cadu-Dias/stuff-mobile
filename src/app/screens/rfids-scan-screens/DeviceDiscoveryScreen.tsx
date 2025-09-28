@@ -11,8 +11,8 @@ import {
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { RootStackNavigationProp } from '../models/stackType';
-import useBLE from '../hooks/useBle';
+import { RootStackNavigationProp } from '../../models/stackType';
+import useBLE from '../../hooks/useBle';
 import { BluetoothDevice } from 'react-native-bluetooth-classic';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 

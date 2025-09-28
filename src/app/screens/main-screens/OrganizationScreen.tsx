@@ -5,9 +5,9 @@ import {
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { OrganizationService } from '../services/organization.service';
-import { RootStackNavigationProp } from '../models/stackType';
-import { Organization } from '../models/organization.model';
+import { OrganizationService } from '../../services/organization.service';
+import { RootStackNavigationProp } from '../../models/stackType';
+import { Organization } from '../../models/organization.model';
 
 type OrgModal = {
   visible: boolean;

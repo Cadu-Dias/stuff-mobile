@@ -3,9 +3,9 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, SafeAreaView, ScrollView, Platform, TouchableOpacity } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { OrganizationService } from '../services/organization.service';
-import { AssetService } from '../services/asset.service';
-import { RootStackNavigationProp } from '../models/stackType';
+import { OrganizationService } from '../../services/organization.service';
+import { AssetService } from '../../services/asset.service';
+import { RootStackNavigationProp } from '../../models/stackType';
 
 const themeColors = {
   background: '#F4A64E',

@@ -6,9 +6,9 @@ import {
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
-import { AssetService } from '../services/asset.service';
-import { Asset, AttributeDetail } from '../models/asset.model';
-import { RootStackNavigationProp } from '../models/stackType';
+import { AssetService } from '../../services/asset.service';
+import { Asset, AttributeDetail } from '../../models/asset.model';
+import { RootStackNavigationProp } from '../../models/stackType';
 
 interface EditModalProps {
     visible: boolean;
