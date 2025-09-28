@@ -14,7 +14,6 @@ import { RootStackNavigationProp } from '../models/stackType';
 
 type TabType = 'members' | 'assets';
 
-// ✅ Modal para criar ativo
 const CreateAssetModal = ({ 
   visible, 
   onClose, 
@@ -259,8 +258,8 @@ const MemberItem = ({ item }: { item: UserInfo }) => (
   </View>
 );
 
-const AssetItem = ({ item, onPress }: { item: Asset; onPress: (assetId: string) => void }) => (
-  <TouchableOpacity style={styles.listItem} onPress={() => onPress(item.id)}>
+const AssetItem = ({ item, onPress }: { item: Asset; onPress: (organizationId: string, assetId: string) => void }) => (
+  <TouchableOpacity style={styles.listItem} onPress={() => onPress(item.organizationId, item.id)}>
     <View style={styles.itemContent}>
       <View style={styles.itemIcon}>
         <Feather name="package" size={20} color="#F4A64E" />
@@ -276,7 +275,7 @@ const AssetItem = ({ item, onPress }: { item: Asset; onPress: (assetId: string) 
     </View>
     <View style={[
       styles.assetStatusBadge,
-      { backgroundColor: item.trashBin ? '#C62828' : '#4CAF50' }
+      { backgroundColor: item.trashBin ? '#C62828' : '#5ECC63' }
     ]}>
       <Text style={styles.assetStatusText}>
         {item.trashBin ? 'Lixeira' : 'Ativo'}
@@ -370,8 +369,8 @@ export default function OrganizationDetailScreen() {
       );
     }
 
-    const handleAssetPress = (assetId: string) => {
-      navigation.navigate('AssetDetails', { assetId });
+    const handleAssetPress = (organizationId: string, assetId: string) => {
+      navigation.navigate('AssetDetails', { organizationId, assetId });
     };
 
     return (

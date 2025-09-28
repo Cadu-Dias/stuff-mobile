@@ -676,7 +676,7 @@ const styles = StyleSheet.create({
         color: '#C62828',
     },
     optionalText: {
-        color: '#4CAF50',
+        color: '#5ECC63',
     },
     valuesSection: {
         padding: 20,
