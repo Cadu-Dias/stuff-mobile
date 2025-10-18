@@ -29,40 +29,23 @@ const HomeScreen = () => {
   const assetService = new AssetService();
 
   const [userData, setUserData] = useState<{ firstName: string; lastName: string; username: string } | null>(null);
-  const [organizationsNum, setOrganizationNum] = useState<number>(0);
   const [assetsNum, setAssetsNum] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   const loadAsynContent = async () => {
     try {
-      const [storedData, organizationNumber, assetsNumber] = await Promise.all([
+      const [storedData, organizationId] = await Promise.all([
         AsyncStorage.getItem('userData'),
-        AsyncStorage.getItem("organizationNumber"),
-        AsyncStorage.getItem("assetsNumber")
+        AsyncStorage.getItem("organizationId"),
       ]);
       
       if (storedData) {
         setUserData(JSON.parse(storedData));
       }
-      
-      if(organizationNumber !== null && organizationNumber !== undefined) {
-        setOrganizationNum(Number(organizationNumber))
-      } else {
-        const organizations = await organizationService.getAllOrganizations();
-        setOrganizationNum(organizations.length);
-        await AsyncStorage.setItem("organizationNumber", String(organizations.length))
-      }
 
-      if(assetsNumber !== null) {
-        setAssetsNum(Number(assetsNumber));
-      } else {
-        const assets = (await assetService.getAssets()).assets;
-        const assetsQuantityArray = assets.map((value) => value.quantity || 0)
-        const assetsNumber = assetsQuantityArray.reduce((prev, cur) => prev + cur, 0);
 
-        setAssetsNum(assetsNumber)
-        await AsyncStorage.setItem("assetsNumber", String(assetsNumber))
-      }
+      const assets = await assetService.getOrganizationAssets(organizationId as string);
+      setAssetsNum(assets.length);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
     } finally {
@@ -194,19 +177,13 @@ const HomeScreen = () => {
                 title="Ativos Totais"
                 value={assetsNum}
                 icon="package-variant"
-                color="#5ECC63"
-              />
-              <StatCard
-                title="Organizações"
-                value={organizationsNum}
-                icon="office-building"
-                color="#2196F3"
+                color="#FF9800"
               />
               <StatCard
                 title="Último Acesso"
                 value="Hoje"
                 icon="clock-outline"
-                color="#FF9800"
+                color="#2196F3"
               />
             </View>
           </View>
@@ -218,15 +195,8 @@ const HomeScreen = () => {
                 title="Ler QR Code"
                 description="Escaneie códigos QR dos ativos"
                 icon="camera"
-                color="#5ECC63"
-                onPress={() => navigation.navigate('QrCodeScan')}
-              />
-              <QuickActionCard
-                title="Conectar RFID"
-                description="Conecte ao leitor RFID"
-                icon="bluetooth"
                 color="#2196F3"
-                onPress={() => navigation.navigate('RFIDScanManager')}
+                onPress={() => navigation.navigate('QrCodeScan')}
               />
               <QuickActionCard
                 title="Criar Organização"
@@ -476,6 +446,6 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#5ECC63',
+    backgroundColor: '#666666',
   },
 });
