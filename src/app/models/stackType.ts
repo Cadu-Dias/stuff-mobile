@@ -5,7 +5,7 @@ import { SelectedAssets } from "./asset.model";
 type RootStackParamList = {
     Login: undefined;
     MainTabs: undefined;
-    OrganizationDetail: { organizationId: string };
+    OrganizationsScreen: undefined;
     AssetDetails: { organizationId: string, assetId: string };
     AttributeDetails: { attributeId: string, assetId: string };
     QrCodeScan: undefined;

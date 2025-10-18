@@ -22,10 +22,10 @@ const TabRoutes = () => {
             />
             <Tab.Screen 
                 name='Organizations'
-                component={SCREENS.OrganizationsScreen}
+                component={SCREENS.OrganizationDetailScreen}
                 options={{
                     tabBarIcon: ({ color, size }) => <Feather name='briefcase' color={color} size={size} />,
-                    tabBarLabel: 'Organizações'
+                    tabBarLabel: 'Organização'
                 }}
             />
             <Tab.Screen 

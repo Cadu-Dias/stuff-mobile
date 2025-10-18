@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet, View, Text, SafeAreaView, FlatList,
-  ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert
+  ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, ScrollView
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
 import { OrganizationService } from '../../services/organization.service';
 import { AssetService } from '../../services/asset.service';
@@ -11,8 +11,9 @@ import { Asset } from '../../models/asset.model';
 import { Organization } from '../../models/organization.model';
 import { UserInfo } from '../../models/user.model';
 import { RootStackNavigationProp } from '../../models/stackType';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-type TabType = 'members' | 'assets';
+type TabType = 'members' | 'assets' | 'reports';
 
 const CreateAssetModal = ({ 
   visible, 
@@ -94,86 +95,105 @@ const CreateAssetModal = ({
           </TouchableOpacity>
         </View>
 
-        <View style={styles.modalContent}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Nome *</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.name}
-              onChangeText={(text) => setFormData({ ...formData, name: text })}
-              placeholder="Nome do ativo"
-              editable={!loading}
-            />
-          </View>
+        <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.formSection}>
+            <Text style={styles.formSectionTitle}>Informações Básicas</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>
+                <Feather name="tag" size={14} color="#F4A64E" /> Nome *
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={formData.name}
+                onChangeText={(text) => setFormData({ ...formData, name: text })}
+                placeholder="Nome do ativo"
+                placeholderTextColor="#999"
+                editable={!loading}
+              />
+            </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Tipo *</Text>
-            <View style={styles.typeSelector}>
-              <TouchableOpacity
-                style={[
-                  styles.typeOption,
-                  formData.type === 'unique' && styles.typeOptionSelected
-                ]}
-                onPress={() => setFormData({ ...formData, type: 'unique' })}
-                disabled={loading}
-              >
-                <Text style={[
-                  styles.typeOptionText,
-                  formData.type === 'unique' && styles.typeOptionTextSelected
-                ]}>
-                  Único
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.typeOption,
-                  formData.type === 'replicable' && styles.typeOptionSelected
-                ]}
-                onPress={() => setFormData({ ...formData, type: 'replicable' })}
-                disabled={loading}
-              >
-                <Text style={[
-                  styles.typeOptionText,
-                  formData.type === 'replicable' && styles.typeOptionTextSelected
-                ]}>
-                  Replicável
-                </Text>
-              </TouchableOpacity>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>
+                <Feather name="file-text" size={14} color="#F4A64E" /> Descrição *
+              </Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                value={formData.description}
+                onChangeText={(text) => setFormData({ ...formData, description: text })}
+                placeholder="Descrição do ativo"
+                placeholderTextColor="#999"
+                multiline
+                numberOfLines={4}
+                editable={!loading}
+              />
             </View>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Descrição *</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={formData.description}
-              onChangeText={(text) => setFormData({ ...formData, description: text })}
-              placeholder="Descrição do ativo"
-              multiline
-              numberOfLines={4}
-              editable={!loading}
-            />
-          </View>
+          <View style={styles.formSection}>
+            <Text style={styles.formSectionTitle}>Configurações</Text>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Quantidade *</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.quantity}
-              onChangeText={(text) => setFormData({ ...formData, quantity: text })}
-              placeholder="Quantidade"
-              keyboardType="numeric"
-              editable={!loading}
-            />
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>
+                <Feather name="list" size={14} color="#F4A64E" /> Tipo *
+              </Text>
+              <View style={styles.typeSelector}>
+                <TouchableOpacity
+                  style={[
+                    styles.typeOption,
+                    formData.type === 'unique' && styles.typeOptionSelected
+                  ]}
+                  onPress={() => setFormData({ ...formData, type: 'unique' })}
+                  disabled={loading}
+                >
+                  <Text style={[
+                    styles.typeOptionText,
+                    formData.type === 'unique' && styles.typeOptionTextSelected
+                  ]}>
+                    Único
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.typeOption,
+                    formData.type === 'replicable' && styles.typeOptionSelected
+                  ]}
+                  onPress={() => setFormData({ ...formData, type: 'replicable' })}
+                  disabled={loading}
+                >
+                  <Text style={[
+                    styles.typeOptionText,
+                    formData.type === 'replicable' && styles.typeOptionTextSelected
+                  ]}>
+                    Replicável
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>
+                <Feather name="hash" size={14} color="#F4A64E" /> Quantidade *
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={formData.quantity}
+                onChangeText={(text) => setFormData({ ...formData, quantity: text })}
+                placeholder="Quantidade"
+                placeholderTextColor="#999"
+                keyboardType="numeric"
+                editable={!loading}
+              />
+            </View>
           </View>
 
           <View style={styles.helpText}>
-            <Feather name="info" size={16} color="#666" />
+            <Feather name="info" size={16} color="#2196F3" />
             <Text style={styles.helpTextContent}>
               Após criar o ativo, você poderá adicionar atributos e configurações adicionais.
             </Text>
           </View>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </Modal>
   );
@@ -183,14 +203,12 @@ const TabSelector = ({
   activeTab, 
   onTabChange, 
   membersCount, 
-  assetsCount,
-  onCreateAsset 
+  assetsCount
 }: {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
   membersCount: number;
   assetsCount: number;
-  onCreateAsset?: () => void;
 }) => {
   return (
     <View style={styles.tabContainer}>
@@ -207,7 +225,7 @@ const TabSelector = ({
           styles.tabText, 
           activeTab === 'members' && styles.activeTabText
         ]}>
-          Membros ({membersCount})
+          Membros
         </Text>
       </TouchableOpacity>
 
@@ -224,36 +242,43 @@ const TabSelector = ({
           styles.tabText, 
           activeTab === 'assets' && styles.activeTabText
         ]}>
-          Ativos ({assetsCount})
+          Ativos
         </Text>
       </TouchableOpacity>
 
-      {/* ✅ Botão de criar ativo quando tab de assets estiver ativa */}
-      {activeTab === 'assets' && onCreateAsset && (
-        <TouchableOpacity
-          style={styles.createButton}
-          onPress={onCreateAsset}
-        >
-          <Feather name="plus" size={18} color="white" />
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity
+        style={[styles.tab, activeTab === 'reports' && styles.activeTab]}
+        onPress={() => onTabChange('reports')}
+      >
+        <Feather 
+          name="bar-chart-2" 
+          size={18} 
+          color={activeTab === 'reports' ? '#fff' : '#F4A64E'} 
+        />
+        <Text style={[
+          styles.tabText, 
+          activeTab === 'reports' && styles.activeTabText
+        ]}>
+          Relatórios
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 };
 
-const MemberItem = ({ item }: { item: UserInfo }) => (
+const MemberItem = ({ member }: { member: UserInfo }) => (
   <View style={styles.listItem}>
     <View style={styles.itemContent}>
       <View style={styles.itemIcon}>
         <Feather name="user" size={20} color="#F4A64E" />
       </View>
       <View style={styles.itemDetails}>
-        <Text style={styles.itemTitle}>{item.email}</Text>
-        <Text style={styles.itemSubtitle}>Função: {item.role}</Text>
+        <Text style={styles.itemTitle}>{`${member.firstName} ${member.lastName}`}</Text>
+        <Text style={styles.itemSubtitle}>E-mail: {member.email}</Text>
       </View>
     </View>
     <View style={styles.memberRoleBadge}>
-      <Text style={styles.memberRoleText}>{item.role}</Text>
+      <Text style={styles.memberRoleText}>{member.role === "user" ? "User" : "Admin"}</Text>
     </View>
   </View>
 );
@@ -287,9 +312,8 @@ const AssetItem = ({ item, onPress }: { item: Asset; onPress: (organizationId: s
 
 export default function OrganizationDetailScreen() {
   const navigation = useNavigation<RootStackNavigationProp>();
-  const route = useRoute();
-  const { organizationId } = route.params as { organizationId: string };
 
+  const [organizationId, setOrganizationId] = useState<string>("");
   const [org, setOrg] = useState<Organization | null>(null);
   const [members, setMembers] = useState<UserInfo[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -301,20 +325,52 @@ export default function OrganizationDetailScreen() {
   const organizationService = new OrganizationService();
   const assetsService = new AssetService();
 
+  useEffect(() => {
+    const loadOrganizationId = async () => {
+      try {
+        const storedOrgId = await AsyncStorage.getItem("organizationId");
+        console.log("OrganizationId carregado do AsyncStorage:", storedOrgId);
+        
+        if (storedOrgId) {
+          setOrganizationId(storedOrgId);
+        } else {
+          setErrorMsg("ID da organização não encontrado.");
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error("Erro ao carregar organizationId:", error);
+        setErrorMsg("Erro ao carregar ID da organização.");
+        setLoading(false);
+      }
+    };
+
+    loadOrganizationId();
+  }, []);
+
   const fetchOrganizationDetails = useCallback(async () => {
-    if (!organizationId) return;
+    if (!organizationId) {
+      console.log("organizationId ainda não está disponível");
+      return;
+    }
+
+    console.log("Buscando detalhes para organizationId:", organizationId);
     setLoading(true);
     setErrorMsg("");
     
     try {
       const orgResponse = await organizationService.getOrganizationById(organizationId);
+      
       if (orgResponse) {
+        console.log("Organização carregada:", orgResponse);
         setOrg(orgResponse);
 
         const [membersResponse, assetsResponse] = await Promise.all([
           organizationService.getMembers(organizationId),
           assetsService.getOrganizationAssets(organizationId)
         ]);
+
+        console.log("Membros carregados:", membersResponse?.length || 0);
+        console.log("Ativos carregados:", assetsResponse?.length || 0);
 
         setMembers(membersResponse || []);
         setAssets(assetsResponse || []);
@@ -329,22 +385,40 @@ export default function OrganizationDetailScreen() {
     }
   }, [organizationId]);
 
+  // ✅ Executa fetch quando organizationId mudar
   useEffect(() => {
-    fetchOrganizationDetails();
-  }, [fetchOrganizationDetails]);
+    if (organizationId) {
+      fetchOrganizationDetails();
+    }
+  }, [organizationId, fetchOrganizationDetails]);
 
-  // ✅ Função para adicionar novo ativo à lista
+  // ✅ Recarrega ao focar na tela
+  useFocusEffect(
+    useCallback(() => {
+      if (organizationId) {
+        console.log("Tela focada, recarregando dados...");
+        fetchOrganizationDetails();
+      }
+    }, [organizationId, fetchOrganizationDetails])
+  );
+
   const handleAssetCreated = (newAsset: Asset) => {
     setAssets(prevAssets => [newAsset, ...prevAssets]);
   };
 
   const renderHeader = () => {
-    if (!org) return null;
+    if (!org) {
+      console.log("renderHeader: org é null");
+      return null;
+    }
+    
+    console.log("renderHeader: Renderizando com org:", org.name);
+    
     return (
       <View style={styles.header}>
-        <Text style={styles.title}>{org.name}</Text>
-        <Text style={styles.description}>{org.description}</Text>
-        <Text style={styles.slug}>Slug: {org.slug}</Text>
+        <Text style={styles.title}>{org.name || 'Nome não disponível'}</Text>
+        <Text style={styles.description}>{org.description || 'Sem descrição'}</Text>
+        <Text style={styles.slug}>Slug: {org.slug || 'N/A'}</Text>
       </View>
     );
   };
@@ -354,7 +428,7 @@ export default function OrganizationDetailScreen() {
       return (
         <FlatList
           data={members}
-          renderItem={({ item }) => <MemberItem item={item} />}
+          renderItem={({ item }) => <MemberItem member={item} />}
           keyExtractor={item => item.id}
           style={styles.tabContent}
           contentContainerStyle={{ paddingBottom: 20 }}
@@ -369,32 +443,57 @@ export default function OrganizationDetailScreen() {
       );
     }
 
+    if (activeTab === 'reports') {
+      return (
+        <View style={styles.constructionContainer}>
+          <Feather name="tool" size={64} color="#F4A64E" />
+          <Text style={styles.constructionTitle}>Em Construção</Text>
+          <Text style={styles.constructionText}>
+            A funcionalidade de relatórios está sendo desenvolvida e estará disponível em breve.
+          </Text>
+          <View style={styles.constructionBadge}>
+            <Feather name="clock" size={16} color="#F4A64E" />
+            <Text style={styles.constructionBadgeText}>Em desenvolvimento</Text>
+          </View>
+        </View>
+      );
+    }
+
     const handleAssetPress = (organizationId: string, assetId: string) => {
       navigation.navigate('AssetDetails', { organizationId, assetId });
     };
 
     return (
-      <FlatList
-        data={assets}
-        renderItem={({ item }) => <AssetItem item={item} onPress={handleAssetPress} />}
-        keyExtractor={item => item.id}
-        style={styles.tabContent}
-        contentContainerStyle={{ paddingBottom: 20 }}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Feather name="package" size={48} color="#ccc" />
-            <Text style={styles.emptyText}>Nenhum ativo nesta organização</Text>
-            <TouchableOpacity 
-              style={styles.emptyCreateButton} 
-              onPress={() => setCreateAssetModalVisible(true)}
-            >
-              <Feather name="plus" size={20} color="#F4A64E" />
-              <Text style={styles.emptyCreateButtonText}>Criar primeiro ativo</Text>
-            </TouchableOpacity>
-          </View>
-        }
-        showsVerticalScrollIndicator={false}
-      />
+      <View style={styles.assetsTabContainer}>
+        <FlatList
+          data={assets}
+          renderItem={({ item }) => <AssetItem item={item} onPress={handleAssetPress} />}
+          keyExtractor={item => item.id}
+          style={styles.tabContent}
+          contentContainerStyle={{ paddingBottom: 20 }}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Feather name="package" size={48} color="#ccc" />
+              <Text style={styles.emptyText}>Nenhum ativo nesta organização</Text>
+              <TouchableOpacity 
+                style={styles.emptyCreateButton} 
+                onPress={() => setCreateAssetModalVisible(true)}
+              >
+                <Feather name="plus" size={20} color="#F4A64E" />
+                <Text style={styles.emptyCreateButtonText}>Criar primeiro ativo</Text>
+              </TouchableOpacity>
+            </View>
+          }
+          showsVerticalScrollIndicator={false}
+        />
+        
+        <TouchableOpacity
+          style={styles.floatingAddButton}
+          onPress={() => setCreateAssetModalVisible(true)}
+        >
+          <Feather name="plus" size={24} color="white" />
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -433,7 +532,6 @@ export default function OrganizationDetailScreen() {
           onTabChange={setActiveTab}
           membersCount={members.length}
           assetsCount={assets.length}
-          onCreateAsset={() => setCreateAssetModalVisible(true)}
         />
         
         {renderTabContent()}
@@ -449,6 +547,7 @@ export default function OrganizationDetailScreen() {
   );
 }
 
+// ... (styles permanecem iguais)
 const styles = StyleSheet.create({
   safeArea: { 
     flex: 1, 
@@ -557,25 +656,9 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: '#fff',
   },
-  // ✅ Estilo do botão de criar
-  createButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F4A64E',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
   tabContent: {
     flex: 1,
   },
-  // ✅ Estilos dos Items das Listas
   listItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -618,7 +701,6 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 4,
   },
-  // ✅ Estilos específicos dos Membros
   memberRoleBadge: {
     backgroundColor: '#F4A64E',
     paddingHorizontal: 12,
@@ -630,7 +712,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
-  // ✅ Estilos específicos dos Assets
   assetMetadata: {
     flexDirection: 'row',
     gap: 12,
@@ -691,11 +772,63 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-
-  // ✅ Estilos do Modal
+  assetsTabContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  floatingAddButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#F4A64E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  constructionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    gap: 20,
+  },
+  constructionTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+  },
+  constructionText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  constructionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF0E0',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 8,
+    marginTop: 8,
+  },
+  constructionBadgeText: {
+    color: '#F4A64E',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F5F5F5',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -704,6 +837,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    backgroundColor: 'white',
   },
   modalTitle: {
     fontSize: 18,
@@ -729,13 +863,33 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
+  formSection: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  formSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 2,
+    borderBottomColor: '#F4A64E',
+  },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   inputLabel: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: '#555',
     marginBottom: 8,
   },
   input: {
@@ -745,6 +899,7 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 16,
     backgroundColor: 'white',
+    color: '#333',
   },
   textArea: {
     height: 100,
@@ -779,15 +934,18 @@ const styles = StyleSheet.create({
   helpText: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#E3F2FD',
     padding: 12,
     borderRadius: 8,
     gap: 8,
     marginTop: 8,
+    marginBottom: 25,
+    borderLeftWidth: 3,
+    borderLeftColor: '#2196F3',
   },
   helpTextContent: {
     fontSize: 14,
-    color: '#666',
+    color: '#1565C0',
     flex: 1,
   },
 });

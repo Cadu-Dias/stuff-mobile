@@ -8,6 +8,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { OrganizationService } from '../../services/organization.service';
 import { RootStackNavigationProp } from '../../models/stackType';
 import { Organization } from '../../models/organization.model';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type OrgModal = {
   visible: boolean;
@@ -226,6 +227,11 @@ export default function OrganizationsScreen() {
     }, [])
   );
 
+  const redirectHome = async (organizationId: string) => {
+    await AsyncStorage.setItem("organizationId", organizationId);
+    navigation.navigate("MainTabs");
+  }
+
   const handleCreateOrg = async (form: { name: string; description: string; slug: string, password: string }) => {
     try {
       await organizationService.createOrganization(form);
@@ -346,7 +352,7 @@ export default function OrganizationsScreen() {
               renderItem={({ item }) => (
                 <OrganizationCard
                   organization={item}
-                  onPress={() => navigation.navigate('OrganizationDetail', { organizationId: item.id })}
+                  onPress={() => redirectHome(item.id)}
                   onDelete={() => handleDelete(item)}
                 />
               )}

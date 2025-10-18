@@ -8,9 +8,8 @@ import HeaderTitle from '../app/components/Header';
 type RootStackParamList = {
     Login: undefined;
     MainTabs: undefined;
-    OrganizationDetail: { organizationId: string };
+    OrganizationsScreen: undefined;
     AssetDetails: { organizationId: string, assetId: string };
-    AttributeDetails: { attributeId: string, assetId: string };
     QrCodeScan: undefined;
     RFIDScanManager: undefined;
     AssetSelection: undefined;
@@ -40,8 +39,8 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
     MainTabs: {
       screen: TabRoutes,
     },
-    OrganizationDetail: {
-      screen: SCREENS.OrganizationDetailScreen,
+    OrganizationsScreen: {
+      screen: SCREENS.OrganizationsScreen,
       options: () => ({
         title: 'Detalhes da Organização', 
         headerBackTitle: undefined
@@ -49,10 +48,6 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
     },
     AssetDetails: {
       screen: SCREENS.AssetDetailScreen,
-      options: {}
-    },
-    AttributeDetails: {
-      screen: SCREENS.AttributeDetailScreen,
       options: {}
     },
     RFIDScanManager: {
