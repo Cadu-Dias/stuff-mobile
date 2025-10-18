@@ -1,16 +1,19 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { PermissionsAndroid, Platform } from "react-native";
+import { Alert, Linking, Platform } from "react-native";
 import RNBluetoothClassic, {
   BluetoothDevice,
   BluetoothDeviceReadEvent,
 } from "react-native-bluetooth-classic";
-import { PERMISSIONS, requestMultiple } from "react-native-permissions";
+import { PERMISSIONS, requestMultiple, RESULTS } from "react-native-permissions";
 import DeviceInfo from "react-native-device-info";
+import Geolocation from "@react-native-community/geolocation"
 
 type VoidCallback = (result: boolean) => void;
 
 interface BluetoothLowEnergyApi {
   requestPermissions(cb: VoidCallback): Promise<void>;
+  checkBluetoothEnabled(): Promise<boolean>;
+  checkLocationEnabled(): Promise<boolean>;
   scanForPeripherals(): void;
   cancelDiscovery(): void;
   connectToDevice: (deviceAddress: string) => Promise<void>;
@@ -36,40 +39,164 @@ function useBLE(): BluetoothLowEnergyApi {
     };
   }, []);
 
+  const checkBluetoothEnabled = useCallback(async (): Promise<boolean> => {
+    try {
+      const isEnabled = await RNBluetoothClassic.isBluetoothEnabled();
+      console.log("Bluetooth habilitado:", isEnabled);
+      return isEnabled;
+    } catch (error) {
+      console.error("Erro ao verificar Bluetooth:", error);
+      return false;
+    }
+  }, []);
+
+  const checkLocationEnabled = useCallback(async (): Promise<boolean> => {
+    return new Promise((resolve) => {
+
+      Geolocation.getCurrentPosition(
+        () => {
+          console.log("Localização habilitada");
+          resolve(true);
+        },
+        (error: any) => {
+          console.log("Localização desabilitada ou sem permissão:", error);
+          resolve(error.code !== 2);
+        },
+        { 
+          enableHighAccuracy: false, 
+          timeout: 5000,
+          maximumAge: 10000 
+        }
+      );
+    });
+  }, []);
+
+  // Requisitar permissões
   const requestPermissions = useCallback(async (cb: VoidCallback) => {
-    if (Platform.OS === "android") {
+    if (Platform.OS !== "android") {
+      cb(true);
+      return;
+    }
+
+    try {
       const apiLevel = await DeviceInfo.getApiLevel();
+      console.log("API Level:", apiLevel);
+
+      const bluetoothEnabled = await checkBluetoothEnabled();
+      if (!bluetoothEnabled) {
+        Alert.alert(
+          "Bluetooth Desabilitado",
+          "Por favor, habilite o Bluetooth para usar a leitura RFID.",
+          [
+            { text: "Cancelar", style: "cancel" },
+            { 
+              text: "Habilitar", 
+              onPress: async () => {
+                try {
+                  await RNBluetoothClassic.requestBluetoothEnabled();
+                  requestPermissions(cb);
+                } catch (error) {
+                  console.error("Erro ao habilitar Bluetooth:", error);
+                  cb(false);
+                }
+              }
+            }
+          ]
+        );
+        cb(false);
+        return;
+      }
+
+      const locationEnabled = await checkLocationEnabled();
+      if (!locationEnabled) {
+        Alert.alert(
+          "Localização Desabilitada",
+          "A localização precisa estar habilitada para usar Bluetooth. Por favor, ative a localização nas configurações.",
+          [
+            { text: "Cancelar", style: "cancel", onPress: () => cb(false) },
+            { 
+              text: "Abrir Configurações", 
+              onPress: () => {
+                Linking.openSettings();
+                cb(false);
+              }
+            }
+          ]
+        );
+        return;
+      }
 
       if (apiLevel < 31) {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          {
-            title: "Location Permission",
-            message: "Bluetooth Low Energy requires Location",
-            buttonNeutral: "Ask Later",
-            buttonNegative: "Cancel",
-            buttonPositive: "OK",
-          }
-        );
-        cb(granted === PermissionsAndroid.RESULTS.GRANTED);
-      } else {
-        const result = await requestMultiple([
-          PERMISSIONS.ANDROID.BLUETOOTH_SCAN,
-          PERMISSIONS.ANDROID.BLUETOOTH_CONNECT,
+        const permissions = await requestMultiple([
           PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
+          PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION,
         ]);
 
         const isGranted =
-          result["android.permission.BLUETOOTH_CONNECT"] === "granted" &&
-          result["android.permission.BLUETOOTH_SCAN"] === "granted" &&
-          result["android.permission.ACCESS_FINE_LOCATION"] === "granted";
+          permissions[PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION] === RESULTS.GRANTED ||
+          permissions[PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION] === RESULTS.GRANTED;
+
+        if (!isGranted) {
+          Alert.alert(
+            "Permissões Necessárias",
+            "As permissões de localização são necessárias para usar Bluetooth. Por favor, conceda as permissões.",
+            [
+              { text: "Cancelar", style: "cancel", onPress: () => cb(false) },
+              { text: "Abrir Configurações", onPress: () => Linking.openSettings() }
+            ]
+          );
+        }
+
+        cb(isGranted);
+      } else {
+        const permissions = await requestMultiple([
+          PERMISSIONS.ANDROID.BLUETOOTH_SCAN,
+          PERMISSIONS.ANDROID.BLUETOOTH_CONNECT,
+          PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION,
+          PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION,
+        ]);
+
+        const isGranted =
+          permissions[PERMISSIONS.ANDROID.BLUETOOTH_CONNECT] === RESULTS.GRANTED &&
+          permissions[PERMISSIONS.ANDROID.BLUETOOTH_SCAN] === RESULTS.GRANTED &&
+          (permissions[PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION] === RESULTS.GRANTED ||
+           permissions[PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION] === RESULTS.GRANTED);
+
+        if (!isGranted) {
+          const deniedPermissions = [];
+          if (permissions[PERMISSIONS.ANDROID.BLUETOOTH_CONNECT] !== RESULTS.GRANTED) {
+            deniedPermissions.push("Bluetooth Connect");
+          }
+          if (permissions[PERMISSIONS.ANDROID.BLUETOOTH_SCAN] !== RESULTS.GRANTED) {
+            deniedPermissions.push("Bluetooth Scan");
+          }
+          if (permissions[PERMISSIONS.ANDROID.ACCESS_FINE_LOCATION] !== RESULTS.GRANTED &&
+              permissions[PERMISSIONS.ANDROID.ACCESS_COARSE_LOCATION] !== RESULTS.GRANTED) {
+            deniedPermissions.push("Localização");
+          }
+
+          Alert.alert(
+            "Permissões Necessárias",
+            `As seguintes permissões são necessárias: ${deniedPermissions.join(", ")}. Por favor, conceda-as nas configurações.`,
+            [
+              { text: "Cancelar", style: "cancel", onPress: () => cb(false) },
+              { text: "Abrir Configurações", onPress: () => Linking.openSettings() }
+            ]
+          );
+        }
 
         cb(isGranted);
       }
-    } else {
-      cb(true);
+    } catch (error) {
+      console.error("Erro ao solicitar permissões:", error);
+      Alert.alert(
+        "Erro",
+        "Ocorreu um erro ao verificar permissões. Por favor, tente novamente.",
+        [{ text: "OK", onPress: () => cb(false) }]
+      );
+      cb(false);
     }
-  }, []);
+  }, [checkBluetoothEnabled, checkLocationEnabled]);
 
   const isDuplicteDevice = (
     devices: BluetoothDevice[],
@@ -115,6 +242,7 @@ function useBLE(): BluetoothLowEnergyApi {
       if (discoveryTimeoutRef.current) {
         clearTimeout(discoveryTimeoutRef.current);
       }
+      await cancelDiscovery();
       setIsDiscovering(false);
     }
   }, [isDiscovering]);
@@ -171,12 +299,9 @@ function useBLE(): BluetoothLowEnergyApi {
       try {
         console.log('Dispositivo Desconectado');
         await RNBluetoothClassic.disconnectFromDevice(connectedDevice.address);
-        // A chamada abaixo pode ser redundante, mas por segurança a mantemos.
-        await connectedDevice.disconnect();
       } catch (error) {
-        console.error("Erro ao desconectar:", error);
+        console.log("Dispositivo já foi desconectado");
       } finally {
-        // Garante que o estado seja limpo, independentemente do sucesso da desconexão
         setConnectedDevice(null);
         setScannedRfids([]);
       }
@@ -187,6 +312,8 @@ function useBLE(): BluetoothLowEnergyApi {
     scanForPeripherals,
     cancelDiscovery,
     requestPermissions,
+    checkBluetoothEnabled,
+    checkLocationEnabled,
     connectToDevice,
     allDevices,
     connectedDevice,
