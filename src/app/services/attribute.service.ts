@@ -30,6 +30,34 @@ export class AttributeService {
         }
     }
 
+    public async createAttribute(attributeProperties: Record<string, any>) {
+        try{
+
+            const accessToken = await AsyncStorage.getItem("accessToken");
+            if (!accessToken) throw new Error("Usuário não autenticado!");
+
+            const response = await fetch(`${this.apiUrl}/attributes`, {
+                method: "POST",
+                headers: { 
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${accessToken}`,
+                },
+                body: JSON.stringify(attributeProperties) 
+            })
+            
+            if(!response.ok) {
+                throw new Error("Não foi possível realizar a criação do atributo")
+            }
+    
+            const responseJson = await response.json() as { data: AttributeDetail; message: string }
+            return responseJson.data
+            
+        } catch (error) {
+            throw error;
+        }
+    }
+
     public async updateAttributeBasic(attributeId: string, attributeProperties: any) {
 
         try {
@@ -66,15 +94,14 @@ export class AttributeService {
             const accessToken = await AsyncStorage.getItem("accessToken");
             if (!accessToken) throw new Error("Usuário não autenticado!");
 
-            const response = await fetch(`${this.apiUrl}/attributes/value/${attributeId}`, {
+            const response = await fetch(`${this.apiUrl}/attributes/${attributeId}`, {
                 method: "DELETE",
                 headers: { "Authorization": `Bearer ${accessToken}` }
             })
                 
 
             if(!response.ok) {
-                console.log(response)
-                throw new Error("Não foi possível deletar o valor do Atributo")
+                throw new Error("Não foi possível deletar o atributo")
             }
         } catch (error) {
             console.log(error)
@@ -88,7 +115,7 @@ export class AttributeService {
             if (!accessToken) throw new Error("Usuário não autenticado!");
 
             const response = await fetch(`${this.apiUrl}/attributes/${attributeId}/value`, {
-                method: "PATCH",
+                method: "POST",
                 headers: { 
                     "Accept": "application/json",
                     "Content-Type": "application/json",
@@ -110,7 +137,7 @@ export class AttributeService {
         }
     }
 
-    public async updateAttributeValues(attributeValueId: string, attributeValueProperties: Partial<{ value: string, timeUnit: string, metricUnit: string }>) {
+    public async updateAttributeValue(attributeValueId: string, attributeValueProperties: Partial<{ value: string, timeUnit: string, metricUnit: string }>) {
         try {
             const accessToken = await AsyncStorage.getItem("accessToken");
             if (!accessToken) throw new Error("Usuário não autenticado!");
@@ -139,7 +166,7 @@ export class AttributeService {
         }
     }
 
-    public async deleteAttributeValues(attributeValueId: string) {
+    public async deleteAttributeValue(attributeValueId: string) {
         try {
             const accessToken = await AsyncStorage.getItem("accessToken");
             if (!accessToken) throw new Error("Usuário não autenticado!");
