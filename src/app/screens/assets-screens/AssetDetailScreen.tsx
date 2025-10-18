@@ -2,37 +2,693 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     StyleSheet, View, Text, SafeAreaView, ScrollView,
     ActivityIndicator, TouchableOpacity, TextInput,
-    Alert, Modal
+    Alert, Modal, Platform, Switch
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Picker } from '@react-native-picker/picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { AssetService } from '../../services/asset.service';
-import { Asset, AttributeDetail } from '../../models/asset.model';
+import { Asset, AttributeDetail, AttributeValue } from '../../models/asset.model';
 import { RootStackNavigationProp } from '../../models/stackType';
+import { AttributeService } from '../../services/attribute.service';
+import useBLE from '../../hooks/useBle';
+import { BluetoothDevice } from 'react-native-bluetooth-classic';
+
+const ATTRIBUTE_TYPES = {
+    number: 'Número',
+    text: 'Texto',
+    metric: 'Métrica',
+    date: 'Data',
+    switch: 'Interruptor',
+    selection: 'Seleção',
+    multi_selection: 'Múltipla Seleção',
+    file: 'Arquivo',
+    time_metric: 'Métrica de Tempo',
+    rfid: 'RFID'
+};
+
+// Modal de Scan RFID
+interface RFIDScanModalProps {
+    visible: boolean;
+    onClose: () => void;
+    onRFIDScanned: (rfid: string) => void;
+}
+
+const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) => {
+    const {
+        allDevices,
+        isDiscovering,
+        scanForPeripherals,
+        connectToDevice,
+        connectedDevice,
+        cancelDiscovery,
+        disconnectFromDevice,
+        scannedRfids,
+    } = useBLE();
+
+    const [connectingTo, setConnectingTo] = useState<BluetoothDevice | null>(null);
+    const [scanStage, setScanStage] = useState<'discovery' | 'scanning'>('discovery');
+
+    useEffect(() => {
+        if (visible) {
+            setScanStage('discovery');
+            scanForPeripherals();
+        } else {
+            cancelDiscovery();
+            disconnectFromDevice();
+        }
+    }, [visible]);
+
+    useEffect(() => {
+        if (connectedDevice) {
+            setScanStage('scanning');
+        }
+    }, [connectedDevice]);
+
+    useEffect(() => {
+        if (scannedRfids.length > 0 && scanStage === 'scanning') {
+            const firstRFID = scannedRfids[0];
+            onRFIDScanned(firstRFID);
+            disconnectFromDevice();
+            onClose();
+        }
+    }, [scannedRfids, scanStage]);
+
+    const handleConnectPress = async (device: BluetoothDevice) => {
+        if (connectingTo || connectedDevice) return;
+
+        setConnectingTo(device);
+        try {
+            await connectToDevice(device.address);
+        } catch (error) {
+            console.error("Falha ao conectar:", error);
+            Alert.alert("Erro", "Não foi possível conectar ao dispositivo");
+        } finally {
+            setConnectingTo(null);
+        }
+    };
+
+    const handleClose = () => {
+        cancelDiscovery();
+        disconnectFromDevice();
+        onClose();
+    };
+
+    const renderDiscoveryStage = () => (
+        <>
+            <View style={styles.scanModalHeader}>
+                <TouchableOpacity onPress={handleClose}>
+                    <Feather name="x" size={24} color="#333" />
+                </TouchableOpacity>
+                <Text style={styles.scanModalTitle}>Conectar Leitor RFID</Text>
+                <View style={{ width: 24 }} />
+            </View>
+
+            <View style={styles.scanModalContent}>
+                <View style={styles.rfidScanHeader}>
+                    <View style={styles.rfidScanIcon}>
+                        <MaterialCommunityIcons name="bluetooth-connect" size={32} color="#F4A64E" />
+                    </View>
+                    <Text style={styles.rfidScanTitle}>Procurando Dispositivos</Text>
+                    <Text style={styles.rfidScanSubtitle}>
+                        Certifique-se de que o leitor está ligado e próximo
+                    </Text>
+                </View>
+
+                <View style={styles.scanActionButtons}>
+                    <TouchableOpacity
+                        style={[styles.scanActionButton, isDiscovering && styles.scanActionButtonActive]}
+                        onPress={isDiscovering ? cancelDiscovery : scanForPeripherals}
+                    >
+                        {isDiscovering && <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />}
+                        <Text style={styles.scanActionButtonText}>
+                            {isDiscovering ? 'Parando...' : 'Buscar Dispositivos'}
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+
+                <ScrollView style={styles.devicesList} showsVerticalScrollIndicator={false}>
+                    {allDevices.length === 0 ? (
+                        <View style={styles.emptyDevices}>
+                            <MaterialCommunityIcons 
+                                name={isDiscovering ? "bluetooth-connect" : "bluetooth-off"} 
+                                size={48} 
+                                color="#ccc" 
+                            />
+                            <Text style={styles.emptyDevicesText}>
+                                {isDiscovering ? 'Procurando...' : 'Nenhum dispositivo encontrado'}
+                            </Text>
+                        </View>
+                    ) : (
+                        <>
+                            <Text style={styles.devicesListTitle}>
+                                Dispositivos Encontrados ({allDevices.length})
+                            </Text>
+                            {allDevices.map((device) => {
+                                const isConnecting = connectingTo?.id === device.id;
+                                return (
+                                    <TouchableOpacity
+                                        key={device.id}
+                                        style={[styles.deviceCard, isConnecting && styles.deviceCardConnecting]}
+                                        onPress={() => handleConnectPress(device)}
+                                        disabled={isConnecting}
+                                    >
+                                        <View style={styles.deviceCardIcon}>
+                                            <MaterialCommunityIcons name="bluetooth" size={24} color="#F4A64E" />
+                                        </View>
+                                        <View style={styles.deviceCardInfo}>
+                                            <Text style={styles.deviceCardName}>
+                                                {device.name || 'Dispositivo Sem Nome'}
+                                            </Text>
+                                            <Text style={styles.deviceCardAddress}>{device.address}</Text>
+                                        </View>
+                                        {isConnecting ? (
+                                            <ActivityIndicator size="small" color="#F4A64E" />
+                                        ) : (
+                                            <Feather name="chevron-right" size={20} color="#ccc" />
+                                        )}
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </>
+                    )}
+                </ScrollView>
+            </View>
+        </>
+    );
+
+    const renderScanningStage = () => (
+        <>
+            <View style={styles.scanModalHeader}>
+                <TouchableOpacity onPress={handleClose}>
+                    <Feather name="x" size={24} color="#333" />
+                </TouchableOpacity>
+                <Text style={styles.scanModalTitle}>Escaneando RFID</Text>
+                <View style={{ width: 24 }} />
+            </View>
+
+            <View style={styles.scanModalContent}>
+                <View style={styles.rfidScanningContainer}>
+                    <View style={styles.rfidScanIcon}>
+                        <MaterialCommunityIcons name="radar" size={64} color="#F4A64E" />
+                    </View>
+                    <ActivityIndicator size="large" color="#F4A64E" style={{ marginVertical: 20 }} />
+                    <Text style={styles.rfidScanningTitle}>Aguardando Tag RFID...</Text>
+                    <Text style={styles.rfidScanningSubtitle}>
+                        Aproxime a tag do leitor
+                    </Text>
+                    
+                    {connectedDevice && (
+                        <View style={styles.connectedDeviceInfo}>
+                            <View style={styles.connectedDot} />
+                            <Text style={styles.connectedDeviceText}>
+                                Conectado: {connectedDevice.name}
+                            </Text>
+                        </View>
+                    )}
+
+                    <View style={styles.scanningInstruction}>
+                        <Feather name="info" size={16} color="#2196F3" />
+                        <Text style={styles.scanningInstructionText}>
+                            O primeiro RFID detectado será automaticamente preenchido no campo
+                        </Text>
+                    </View>
+                </View>
+
+                <TouchableOpacity style={styles.cancelScanButton} onPress={handleClose}>
+                    <Text style={styles.cancelScanButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+            </View>
+        </>
+    );
+
+    return (
+        <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+            <SafeAreaView style={styles.scanModalContainer}>
+                {scanStage === 'discovery' ? renderDiscoveryStage() : renderScanningStage()}
+            </SafeAreaView>
+        </Modal>
+    );
+};
 
 interface EditModalProps {
     visible: boolean;
     type: 'asset' | 'new-attribute';
     data: any;
+    assetId?: string;
     onSave: (data: any) => void;
     onCancel: () => void;
 }
 
-const EditModal = ({ visible, type, data, onSave, onCancel }: EditModalProps) => {
+const EditModal = ({ visible, type, data, assetId, onSave, onCancel }: EditModalProps) => {
     const [formData, setFormData] = useState(data || {});
+    const [saving, setSaving] = useState(false);
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [showTimePicker, setShowTimePicker] = useState(false);
+    const [dateValue, setDateValue] = useState(new Date());
+    const [tempDate, setTempDate] = useState(new Date());
+    const [rfidScanModalVisible, setRfidScanModalVisible] = useState(false);
+
+    const [hasBlePermissions, setHasBlePermissions] = useState(false);
+    const [isBluetoothEnabled, setIsBluetoothEnabled] = useState(false);
+    const [isLocationEnabled, setIsLocationEnabled] = useState(false);
+
+    const { 
+        requestPermissions, 
+        checkBluetoothEnabled, 
+        checkLocationEnabled 
+    } = useBLE();
+
 
     useEffect(() => {
         setFormData(data || {});
+        if (data?.value && data?.type === 'date') {
+            const parsedDate = new Date(data.value);
+            if (!isNaN(parsedDate.getTime())) {
+                setDateValue(parsedDate);
+                setTempDate(parsedDate);
+            }
+        } else {
+            setDateValue(new Date());
+            setTempDate(new Date());
+        }
     }, [data]);
 
-    const handleSave = () => {
+
+    useEffect(() => {
+        if (visible) {
+            checkServicesStatus();
+        }
+    }, [visible]);
+
+
+    useEffect(() => {
+        setFormData(data || {});
+        if (data?.value && data?.type === 'date') {
+            const parsedDate = new Date(data.value);
+            if (!isNaN(parsedDate.getTime())) {
+                setDateValue(parsedDate);
+                setTempDate(parsedDate);
+            }
+        } else {
+            setDateValue(new Date());
+            setTempDate(new Date());
+        }
+    }, [data]);
+
+    
+    const checkServicesStatus = async () => {
+        try {
+            const [bluetooth, location] = await Promise.all([
+                checkBluetoothEnabled(),
+                checkLocationEnabled()
+            ]);
+            
+            setIsBluetoothEnabled(bluetooth);
+            setIsLocationEnabled(location);
+        } catch (error) {
+            console.error("Erro ao verificar status:", error);
+        }
+    };
+
+    const handleOpenRfidScan = async () => {
+        // Verificar se Bluetooth está habilitado
+        if (!isBluetoothEnabled) {
+            Alert.alert(
+                "Bluetooth Desabilitado",
+                "Por favor, habilite o Bluetooth para usar a leitura RFID.",
+                [
+                    { 
+                        text: "OK",
+                        onPress: checkServicesStatus // Verificar novamente quando fechar
+                    }
+                ]
+            );
+            return;
+        }
+
+        // Verificar se Localização está habilitada
+        if (!isLocationEnabled) {
+            Alert.alert(
+                "Localização Desabilitada",
+                "Por favor, habilite a localização para usar a leitura RFID via Bluetooth.",
+                [
+                    { 
+                        text: "OK",
+                        onPress: checkServicesStatus // Verificar novamente quando fechar
+                    }
+                ]
+            );
+            return;
+        }
+
+        // Verificar permissões BLE
+        if (hasBlePermissions) {
+            setRfidScanModalVisible(true);
+        } else {
+            requestPermissions(isGranted => {
+                setHasBlePermissions(isGranted);
+                if (isGranted) {
+                    setRfidScanModalVisible(true);
+                } else {
+                    Alert.alert(
+                        "Permissões Necessárias",
+                        "As permissões de Bluetooth são necessárias para escanear tags RFID.",
+                        [{ text: "OK" }]
+                    );
+                }
+            });
+        }
+    };
+
+    const validateValue = (value: string, type: string): boolean => {
+        if (!value || value.trim() === '') {
+            Alert.alert("Erro", "O valor não pode estar vazio!");
+            return false;
+        }
+
+        switch (type) {
+            case 'number':
+            case 'metric':
+            case 'time_metric':
+                if (isNaN(Number(value))) {
+                    Alert.alert("Erro", "O valor deve ser um número válido!");
+                    return false;
+                }
+                break;
+            
+            case 'date':
+                const parsedDate = new Date(value);
+                if (isNaN(parsedDate.getTime())) {
+                    Alert.alert("Erro", "Data inválida!");
+                    return false;
+                }
+                break;
+        }
+
+        return true;
+    };
+
+    const handleSave = async () => {
         if (type === 'new-attribute') {
             if (!formData.name || !formData.description || !formData.type) {
                 Alert.alert("Erro", "Nome, descrição e tipo são obrigatórios!");
                 return;
             }
+
+            if (formData.type === 'switch') {
+                if (formData.value === undefined || formData.value === null || formData.value === '') {
+                    formData.value = 'false';
+                }
+            } else if (formData.type === 'date') {
+                if (!formData.value) {
+                    Alert.alert("Erro", "Por favor, selecione uma data!");
+                    return;
+                }
+            } else {
+                if (!validateValue(formData.value, formData.type)) {
+                    return;
+                }
+            }
         }
-        onSave(formData);
+        
+        setSaving(true);
+        try {
+            await onSave(formData);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleRFIDScanned = (rfid: string) => {
+        setFormData({ ...formData, value: rfid });
+        setRfidScanModalVisible(false);
+    };
+
+    const handleDateChange = (event: any, selectedDate?: Date) => {
+        const currentDate = selectedDate || tempDate;
+        
+        if (event.type === 'dismissed') {
+            setShowDatePicker(false);
+            setShowTimePicker(false);
+            return;
+        }
+
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
+            if (selectedDate) {
+                setTempDate(currentDate);
+                setShowTimePicker(true);
+            }
+        } else {
+            if (selectedDate) {
+                setTempDate(currentDate);
+            }
+        }
+    };
+
+    const handleTimeChange = (event: any, selectedTime?: Date) => {
+        if (event.type === 'dismissed') {
+            setShowTimePicker(false);
+            return;
+        }
+
+        setShowTimePicker(false);
+        
+        if (selectedTime) {
+            const combined = new Date(tempDate);
+            combined.setHours(selectedTime.getHours());
+            combined.setMinutes(selectedTime.getMinutes());
+            
+            setDateValue(combined);
+            setFormData({ ...formData, value: combined.toISOString() });
+        }
+    };
+
+    const confirmIOSDate = () => {
+        setShowDatePicker(false);
+        setDateValue(tempDate);
+        setFormData({ ...formData, value: tempDate.toISOString() });
+    };
+
+    const formatDateTime = (isoString: string) => {
+        if (!isoString) return '';
+        const date = new Date(isoString);
+        return date.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    };
+
+    const renderValueInput = () => {
+        const attributeType = formData.type;
+
+        switch (attributeType) {
+            case 'number':
+            case 'metric':
+            case 'time_metric':
+                return (
+                    <>
+                        <TextInput
+                            style={styles.input}
+                            value={formData.value || ''}
+                            onChangeText={(text) => {
+                                const numericValue = text.replace(/[^0-9.]/g, '');
+                                setFormData({ ...formData, value: numericValue });
+                            }}
+                            placeholder="Digite um valor numérico"
+                            placeholderTextColor="#999"
+                            keyboardType="decimal-pad"
+                            editable={!saving}
+                        />
+                        <Text style={styles.inputHint}>
+                            Digite apenas números. Use ponto (.) para decimais.
+                        </Text>
+                    </>
+                );
+
+            case 'date':
+                return (
+                    <>
+                        <TouchableOpacity
+                            style={[styles.input, styles.dateButton]}
+                            onPress={() => {
+                                setTempDate(formData.value ? new Date(formData.value) : new Date());
+                                setShowDatePicker(true);
+                            }}
+                            disabled={saving}
+                        >
+                            <Feather name="calendar" size={16} color="#666" />
+                            <Text style={[
+                                styles.dateButtonText,
+                                !formData.value && styles.dateButtonPlaceholder
+                            ]}>
+                                {formData.value ? formatDateTime(formData.value) : 'Selecione data e hora'}
+                            </Text>
+                        </TouchableOpacity>
+                        
+                        {showDatePicker && (
+                            <>
+                                <DateTimePicker
+                                    value={tempDate}
+                                    mode="date"
+                                    is24Hour={true}
+                                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                    onChange={handleDateChange}
+                                    locale="pt-BR"
+                                />
+                                {Platform.OS === 'ios' && (
+                                    <TouchableOpacity
+                                        style={styles.confirmDateButton}
+                                        onPress={confirmIOSDate}
+                                    >
+                                        <Text style={styles.confirmDateButtonText}>Confirmar Data</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </>
+                        )}
+                        
+                        {showTimePicker && Platform.OS === 'android' && (
+                            <DateTimePicker
+                                value={tempDate}
+                                mode="time"
+                                is24Hour={true}
+                                display="default"
+                                onChange={handleTimeChange}
+                                locale="pt-BR"
+                            />
+                        )}
+                        
+                        <Text style={styles.inputHint}>
+                            Selecione a data e hora desejadas
+                        </Text>
+                    </>
+                );
+
+            case 'switch':
+                return (
+                    <>
+                        <View style={styles.switchContainer}>
+                            <Text style={styles.switchLabel}>
+                                {formData.value === 'true' || formData.value === true ? 'Ativado' : 'Desativado'}
+                            </Text>
+                            <Switch
+                                value={formData.value === 'true' || formData.value === true}
+                                onValueChange={(val) => setFormData({ ...formData, value: val.toString() })}
+                                trackColor={{ false: '#ccc', true: '#F4A64E' }}
+                                thumbColor={formData.value === 'true' || formData.value === true ? '#fff' : '#f4f3f4'}
+                                disabled={saving}
+                            />
+                        </View>
+                        <Text style={styles.inputHint}>
+                            Defina o valor inicial do interruptor
+                        </Text>
+                    </>
+                );
+
+            case 'rfid':
+                const canUseRfid = isBluetoothEnabled && isLocationEnabled;
+                
+                return (
+                    <>
+                        <View style={styles.valueInputContainer}>
+                            <TextInput
+                                style={[styles.input, styles.inputWithButton]}
+                                value={formData.value || ''}
+                                onChangeText={(text) => setFormData({ ...formData, value: text })}
+                                placeholder="Escaneie ou digite o RFID"
+                                placeholderTextColor="#999"
+                                editable={!saving}
+                            />
+                            <TouchableOpacity
+                                style={[
+                                    styles.scanButton,
+                                    !canUseRfid && styles.scanButtonDisabled
+                                ]}
+                                onPress={handleOpenRfidScan}
+                                disabled={saving}
+                            >
+                                <MaterialCommunityIcons 
+                                    name={canUseRfid ? "radar" : "radio-off"} 
+                                    size={20} 
+                                    color="white" 
+                                />
+                                <Text style={styles.scanButtonText}>Escanear</Text>
+                            </TouchableOpacity>
+                        </View>
+                        
+                        {/* Indicadores de status */}
+                        <View style={styles.rfidStatusContainer}>
+                            <View style={styles.rfidStatusItem}>
+                                <Feather 
+                                    name={isBluetoothEnabled ? "check-circle" : "x-circle"} 
+                                    size={14} 
+                                    color={isBluetoothEnabled ? "#5ECC63" : "#FF6B6B"} 
+                                />
+                                <Text style={[
+                                    styles.rfidStatusText,
+                                    !isBluetoothEnabled && styles.rfidStatusTextError
+                                ]}>
+                                    Bluetooth {isBluetoothEnabled ? 'ativo' : 'inativo'}
+                                </Text>
+                            </View>
+                            
+                            <View style={styles.rfidStatusItem}>
+                                <Feather 
+                                    name={isLocationEnabled ? "check-circle" : "x-circle"} 
+                                    size={14} 
+                                    color={isLocationEnabled ? "#5ECC63" : "#FF6B6B"} 
+                                />
+                                <Text style={[
+                                    styles.rfidStatusText,
+                                    !isLocationEnabled && styles.rfidStatusTextError
+                                ]}>
+                                    Localização {isLocationEnabled ? 'ativa' : 'inativa'}
+                                </Text>
+                            </View>
+                        </View>
+
+                        {!canUseRfid && (
+                            <View style={styles.rfidWarning}>
+                                <Feather name="alert-triangle" size={16} color="#FF9800" />
+                                <Text style={styles.rfidWarningText}>
+                                    {!isBluetoothEnabled && !isLocationEnabled
+                                        ? 'Habilite o Bluetooth e a Localização para escanear'
+                                        : !isBluetoothEnabled
+                                        ? 'Habilite o Bluetooth para escanear'
+                                        : 'Habilite a Localização para escanear'}
+                                </Text>
+                            </View>
+                        )}
+
+                        <Text style={styles.inputHint}>
+                            Use o botão para escanear um RFID tag ou digite manualmente
+                        </Text>
+                    </>
+                );
+
+            case 'text':
+            default:
+                return (
+                    <>
+                        <TextInput
+                            style={styles.input}
+                            value={formData.value || ''}
+                            onChangeText={(text) => setFormData({ ...formData, value: text })}
+                            placeholder="Digite o valor inicial"
+                            placeholderTextColor="#999"
+                            editable={!saving}
+                        />
+                        <Text style={styles.inputHint}>
+                            Digite o valor inicial do atributo
+                        </Text>
+                    </>
+                );
+        }
     };
 
     const getModalTitle = () => {
@@ -47,163 +703,731 @@ const EditModal = ({ visible, type, data, onSave, onCancel }: EditModalProps) =>
     };
 
     return (
-        <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-            <SafeAreaView style={styles.modalContainer}>
-                <View style={styles.modalHeader}>
-                    <TouchableOpacity onPress={onCancel}>
-                        <Feather name="x" size={24} color="#333" />
-                    </TouchableOpacity>
-                    <Text style={styles.modalTitle}>{getModalTitle()}</Text>
-                    <TouchableOpacity onPress={handleSave} style={styles.saveButton}>
-                        <Text style={styles.saveButtonText}>
-                            {type === 'new-attribute' ? 'Criar' : 'Salvar'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-
-                <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                    {type === 'asset' ? (
-                        <>
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Nome</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formData.name || ''}
-                                    onChangeText={(text) => setFormData({ ...formData, name: text })}
-                                    placeholder="Nome do ativo"
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Descrição</Text>
-                                <TextInput
-                                    style={[styles.input, styles.textArea]}
-                                    value={formData.description || ''}
-                                    onChangeText={(text) => setFormData({ ...formData, description: text })}
-                                    placeholder="Descrição do ativo"
-                                    multiline
-                                    numberOfLines={4}
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Tipo</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formData.type || ''}
-                                    onChangeText={(text) => setFormData({ ...formData, type: text })}
-                                    placeholder="Tipo do ativo"
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Quantidade</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formData.quantity?.toString() || ''}
-                                    onChangeText={(text) => setFormData({ ...formData, quantity: parseInt(text) || 0 })}
-                                    placeholder="Quantidade"
-                                    keyboardType="numeric"
-                                />
-                            </View>
-                        </>
-                    ) : (
-                        <>
-                            {/* ✅ Formulário de criação de atributo */}
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Nome *</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formData.name || ''}
-                                    onChangeText={(text) => setFormData({ ...formData, name: text })}
-                                    placeholder="Nome do atributo"
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Descrição *</Text>
-                                <TextInput
-                                    style={[styles.input, styles.textArea]}
-                                    value={formData.description || ''}
-                                    onChangeText={(text) => setFormData({ ...formData, description: text })}
-                                    placeholder="Descrição do atributo"
-                                    multiline
-                                    numberOfLines={3}
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Tipo *</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formData.type || ''}
-                                    onChangeText={(text) => setFormData({ ...formData, type: text })}
-                                    placeholder="Ex: texto, número, data..."
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Unidade</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formData.unit || ''}
-                                    onChangeText={(text) => setFormData({ ...formData, unit: text })}
-                                    placeholder="Ex: kg, metros, unidades..."
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Unidade de Tempo</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={formData.timeUnit || ''}
-                                    onChangeText={(text) => setFormData({ ...formData, timeUnit: text })}
-                                    placeholder="Ex: diário, semanal, mensal..."
-                                />
-                            </View>
-
-                            <View style={styles.inputGroup}>
-                                <View style={styles.checkboxContainer}>
-                                    <TouchableOpacity
-                                        style={[styles.checkbox, formData.required && styles.checkboxChecked]}
-                                        onPress={() => setFormData({ ...formData, required: !formData.required })}
-                                    >
-                                        {formData.required && (
-                                            <Feather name="check" size={16} color="white" />
-                                        )}
-                                    </TouchableOpacity>
-                                    <Text style={styles.checkboxLabel}>Campo obrigatório</Text>
-                                </View>
-                            </View>
-
-                            <View style={styles.helpText}>
-                                <Feather name="info" size={16} color="#666" />
-                                <Text style={styles.helpTextContent}>
-                                    Após criar o atributo, você poderá gerenciar seus valores na tela de detalhes.
+        <>
+            <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+                <SafeAreaView style={styles.modalContainer}>
+                    <View style={styles.modalHeader}>
+                        <TouchableOpacity onPress={onCancel} disabled={saving}>
+                            <Feather name="x" size={24} color="#333" />
+                        </TouchableOpacity>
+                        <Text style={styles.modalTitle}>{getModalTitle()}</Text>
+                        <TouchableOpacity 
+                            onPress={handleSave} 
+                            style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                            disabled={saving}
+                        >
+                            {saving ? (
+                                <ActivityIndicator size="small" color="white" />
+                            ) : (
+                                <Text style={styles.saveButtonText}>
+                                    {type === 'new-attribute' ? 'Criar' : 'Salvar'}
                                 </Text>
-                            </View>
-                        </>
-                    )}
-                </ScrollView>
-            </SafeAreaView>
-        </Modal>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+
+                    <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+                        {type === 'asset' ? (
+                            <>
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.inputLabel}>
+                                        <Feather name="tag" size={14} color="#F4A64E" /> Nome
+                                    </Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={formData.name || ''}
+                                        onChangeText={(text) => setFormData({ ...formData, name: text })}
+                                        placeholder="Nome do ativo"
+                                        placeholderTextColor="#999"
+                                        editable={!saving}
+                                    />
+                                </View>
+
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.inputLabel}>
+                                        <Feather name="file-text" size={14} color="#F4A64E" /> Descrição
+                                    </Text>
+                                    <TextInput
+                                        style={[styles.input, styles.textArea]}
+                                        value={formData.description || ''}
+                                        onChangeText={(text) => setFormData({ ...formData, description: text })}
+                                        placeholder="Descrição do ativo"
+                                        placeholderTextColor="#999"
+                                        multiline
+                                        numberOfLines={4}
+                                        editable={!saving}
+                                    />
+                                </View>
+
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.inputLabel}>
+                                        <Feather name="bookmark" size={14} color="#F4A64E" /> Tipo
+                                    </Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={formData.type || ''}
+                                        onChangeText={(text) => setFormData({ ...formData, type: text })}
+                                        placeholder="Tipo do ativo"
+                                        placeholderTextColor="#999"
+                                        editable={!saving}
+                                    />
+                                </View>
+
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.inputLabel}>
+                                        <Feather name="hash" size={14} color="#F4A64E" /> Quantidade
+                                    </Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        value={formData.quantity?.toString() || ''}
+                                        onChangeText={(text) => setFormData({ ...formData, quantity: parseInt(text) || 0 })}
+                                        placeholder="Quantidade"
+                                        placeholderTextColor="#999"
+                                        keyboardType="numeric"
+                                        editable={!saving}
+                                    />
+                                </View>
+                            </>
+                        ) : (
+                            <>
+                                <View style={styles.formSection}>
+                                    <Text style={styles.formSectionTitle}>Informações Básicas</Text>
+                                    
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.inputLabel}>
+                                            <Feather name="tag" size={14} color="#F4A64E" /> Nome *
+                                        </Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            value={formData.name || ''}
+                                            onChangeText={(text) => setFormData({ ...formData, name: text })}
+                                            placeholder="Nome do atributo"
+                                            placeholderTextColor="#999"
+                                            editable={!saving}
+                                        />
+                                    </View>
+
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.inputLabel}>
+                                            <Feather name="file-text" size={14} color="#F4A64E" /> Descrição *
+                                        </Text>
+                                        <TextInput
+                                            style={[styles.input, styles.textArea]}
+                                            value={formData.description || ''}
+                                            onChangeText={(text) => setFormData({ ...formData, description: text })}
+                                            placeholder="Descrição do atributo"
+                                            placeholderTextColor="#999"
+                                            multiline
+                                            numberOfLines={3}
+                                            editable={!saving}
+                                        />
+                                    </View>
+
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.inputLabel}>
+                                            <Feather name="list" size={14} color="#F4A64E" /> Tipo *
+                                        </Text>
+                                        <View style={styles.pickerContainer}>
+                                            <Picker
+                                                selectedValue={formData.type || ''}
+                                                onValueChange={(itemValue) => {
+                                                    setFormData({ ...formData, type: itemValue, value: '' });
+                                                    if (itemValue === 'switch') {
+                                                        setFormData({ ...formData, type: itemValue, value: 'false' });
+                                                    }
+                                                }}
+                                                enabled={!saving}
+                                                style={styles.picker}
+                                            >
+                                                <Picker.Item label="Selecione o tipo" value="" />
+                                                {Object.entries(ATTRIBUTE_TYPES).map(([key, label]) => (
+                                                    <Picker.Item key={key} label={label} value={key} />
+                                                ))}
+                                            </Picker>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                <View style={styles.formSection}>
+                                    <Text style={styles.formSectionTitle}>Configurações Adicionais</Text>
+                                    
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.inputLabel}>
+                                            <Feather name="minimize-2" size={14} color="#F4A64E" /> Unidade
+                                        </Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            value={formData.unit || ''}
+                                            onChangeText={(text) => setFormData({ ...formData, unit: text })}
+                                            placeholder="Ex: kg, metros, unidades..."
+                                            placeholderTextColor="#999"
+                                            editable={!saving}
+                                        />
+                                    </View>
+
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.inputLabel}>
+                                            <Feather name="clock" size={14} color="#F4A64E" /> Unidade de Tempo
+                                        </Text>
+                                        <TextInput
+                                            style={styles.input}
+                                            value={formData.timeUnit || ''}
+                                            onChangeText={(text) => setFormData({ ...formData, timeUnit: text })}
+                                            placeholder="Ex: diário, semanal, mensal..."
+                                            placeholderTextColor="#999"
+                                            editable={!saving}
+                                        />
+                                    </View>
+                                </View>
+
+                                <View style={styles.formSection}>
+                                    <Text style={styles.formSectionTitle}>Valor Inicial</Text>
+                                    
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.inputLabel}>
+                                            <Feather name="database" size={14} color="#F4A64E" /> Valor *
+                                        </Text>
+                                        {formData.type ? renderValueInput() : (
+                                            <Text style={styles.selectTypeFirst}>
+                                                Selecione um tipo primeiro para configurar o valor
+                                            </Text>
+                                        )}
+                                    </View>
+
+                                    <View style={styles.inputGroup}>
+                                        <View style={styles.checkboxContainer}>
+                                            <TouchableOpacity
+                                                style={[styles.checkbox, formData.required && styles.checkboxChecked]}
+                                                onPress={() => setFormData({ ...formData, required: !formData.required })}
+                                                disabled={saving}
+                                            >
+                                                {formData.required && (
+                                                    <Feather name="check" size={16} color="white" />
+                                                )}
+                                            </TouchableOpacity>
+                                            <Text style={styles.checkboxLabel}>Campo obrigatório</Text>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                <View style={styles.helpText}>
+                                    <Feather name="info" size={16} color="#2196F3" />
+                                    <Text style={styles.helpTextContent}>
+                                        O valor inicial será criado automaticamente após a criação do atributo.
+                                    </Text>
+                                </View>
+                            </>
+                        )}
+                    </ScrollView>
+                </SafeAreaView>
+            </Modal>
+
+            <RFIDScanModal
+                visible={rfidScanModalVisible}
+                onClose={() => setRfidScanModalVisible(false)}
+                onRFIDScanned={handleRFIDScanned}
+            />
+        </>
     );
 };
 
+// Modal para editar valor
+interface EditValueModalProps {
+    visible: boolean;
+    value: AttributeValue | null;
+    attributeType: string;
+    onSave: (newValue: string) => void;
+    onCancel: () => void;
+}
+
+const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: EditValueModalProps) => {
+    const [newValue, setNewValue] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [showTimePicker, setShowTimePicker] = useState(false);
+    const [dateValue, setDateValue] = useState(new Date());
+    const [tempDate, setTempDate] = useState(new Date());
+    const [rfidScanModalVisible, setRfidScanModalVisible] = useState(false);
+
+    const { 
+        requestPermissions, 
+        checkBluetoothEnabled, 
+        checkLocationEnabled 
+    } = useBLE();
+
+    const [hasBlePermissions, setHasBlePermissions] = useState(false);
+    const [isBluetoothEnabled, setIsBluetoothEnabled] = useState(false);
+    const [isLocationEnabled, setIsLocationEnabled] = useState(false);
+
+    useEffect(() => {
+        const val = value?.value || '';
+        setNewValue(val);
+        
+        if (attributeType === 'date' && val) {
+            const parsedDate = new Date(val);
+            if (!isNaN(parsedDate.getTime())) {
+                setDateValue(parsedDate);
+                setTempDate(parsedDate);
+            }
+        } else {
+            setDateValue(new Date());
+            setTempDate(new Date());
+        }
+    }, [value, attributeType]);
+
+    useEffect(() => {
+        if (visible && attributeType === 'rfid') {
+            checkServicesStatus();
+        }
+    }, [visible, attributeType]);
+
+    const checkServicesStatus = async () => {
+        try {
+            const [bluetooth, location] = await Promise.all([
+                checkBluetoothEnabled(),
+                checkLocationEnabled()
+            ]);
+            
+            setIsBluetoothEnabled(bluetooth);
+            setIsLocationEnabled(location);
+        } catch (error) {
+            console.error("Erro ao verificar status:", error);
+        }
+    };
+
+    const handleOpenRfidScan = async () => {
+        if (!isBluetoothEnabled) {
+            Alert.alert(
+                "Bluetooth Desabilitado",
+                "Por favor, habilite o Bluetooth para usar a leitura RFID.",
+                [
+                    { 
+                        text: "OK",
+                        onPress: checkServicesStatus
+                    }
+                ]
+            );
+            return;
+        }
+
+        if (!isLocationEnabled) {
+            Alert.alert(
+                "Localização Desabilitada",
+                "Por favor, habilite a localização para usar a leitura RFID via Bluetooth.",
+                [
+                    { 
+                        text: "OK",
+                        onPress: checkServicesStatus
+                    }
+                ]
+            );
+            return;
+        }
+
+        if (hasBlePermissions) {
+            setRfidScanModalVisible(true);
+        } else {
+            requestPermissions(isGranted => {
+                setHasBlePermissions(isGranted);
+                if (isGranted) {
+                    setRfidScanModalVisible(true);
+                } else {
+                    Alert.alert(
+                        "Permissões Necessárias",
+                        "As permissões de Bluetooth são necessárias para escanear tags RFID.",
+                        [{ text: "OK" }]
+                    );
+                }
+            });
+        }
+    };
+
+    useEffect(() => {
+        const val = value?.value || '';
+        setNewValue(val);
+        
+        if (attributeType === 'date' && val) {
+            const parsedDate = new Date(val);
+            if (!isNaN(parsedDate.getTime())) {
+                setDateValue(parsedDate);
+                setTempDate(parsedDate);
+            }
+        } else {
+            setDateValue(new Date());
+            setTempDate(new Date());
+        }
+    }, [value, attributeType]);
+
+    const validateValue = (val: string, type: string): boolean => {
+        if (!val || val.trim() === '') {
+            Alert.alert("Erro", "O valor não pode estar vazio!");
+            return false;
+        }
+
+        switch (type) {
+            case 'number':
+            case 'metric':
+            case 'time_metric':
+                if (isNaN(Number(val))) {
+                    Alert.alert("Erro", "O valor deve ser um número válido!");
+                    return false;
+                }
+                break;
+            
+            case 'date':
+                const parsedDate = new Date(val);
+                if (isNaN(parsedDate.getTime())) {
+                    Alert.alert("Erro", "Data inválida!");
+                    return false;
+                }
+                break;
+        }
+
+        return true;
+    };
+
+    const handleSave = async () => {
+        if (attributeType === 'switch') {
+            // Para switch, qualquer valor é válido
+        } else if (!validateValue(newValue, attributeType)) {
+            return;
+        }
+
+        setSaving(true);
+        try {
+            await onSave(newValue);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleRFIDScanned = (rfid: string) => {
+        setNewValue(rfid);
+        setRfidScanModalVisible(false);
+    };
+
+    const handleDateChange = (event: any, selectedDate?: Date) => {
+        const currentDate = selectedDate || tempDate;
+        
+        if (event.type === 'dismissed') {
+            setShowDatePicker(false);
+            setShowTimePicker(false);
+            return;
+        }
+
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
+            if (selectedDate) {
+                setTempDate(currentDate);
+                setShowTimePicker(true);
+            }
+        } else {
+            if (selectedDate) {
+                setTempDate(currentDate);
+            }
+        }
+    };
+
+    const handleTimeChange = (event: any, selectedTime?: Date) => {
+        if (event.type === 'dismissed') {
+            setShowTimePicker(false);
+            return;
+        }
+
+        setShowTimePicker(false);
+        
+        if (selectedTime) {
+            const combined = new Date(tempDate);
+            combined.setHours(selectedTime.getHours());
+            combined.setMinutes(selectedTime.getMinutes());
+            
+            setDateValue(combined);
+            setNewValue(combined.toISOString());
+        }
+    };
+
+    const confirmIOSDate = () => {
+        setShowDatePicker(false);
+        setDateValue(tempDate);
+        setNewValue(tempDate.toISOString());
+    };
+
+    const formatDateTime = (isoString: string) => {
+        if (!isoString) return '';
+        const date = new Date(isoString);
+        return date.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    };
+
+    const renderValueInput = () => {
+        switch (attributeType) {
+            case 'number':
+            case 'metric':
+            case 'time_metric':
+                return (
+                    <TextInput
+                        style={styles.input}
+                        value={newValue}
+                        onChangeText={(text) => {
+                            const numericValue = text.replace(/[^0-9.]/g, '');
+                            setNewValue(numericValue);
+                        }}
+                        placeholder="Digite um valor numérico"
+                        placeholderTextColor="#999"
+                        keyboardType="decimal-pad"
+                        editable={!saving}
+                    />
+                );
+
+            case 'date':
+                return (
+                    <>
+                        <TouchableOpacity
+                            style={[styles.input, styles.dateButton]}
+                            onPress={() => {
+                                setTempDate(newValue ? new Date(newValue) : new Date());
+                                setShowDatePicker(true);
+                            }}
+                            disabled={saving}
+                        >
+                            <Feather name="calendar" size={16} color="#666" />
+                            <Text style={[
+                                styles.dateButtonText,
+                                !newValue && styles.dateButtonPlaceholder
+                            ]}>
+                                {newValue ? formatDateTime(newValue) : 'Selecione data e hora'}
+                            </Text>
+                        </TouchableOpacity>
+                        
+                        {showDatePicker && (
+                            <>
+                                <DateTimePicker
+                                    value={tempDate}
+                                    mode="date"
+                                    is24Hour={true}
+                                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                    onChange={handleDateChange}
+                                    locale="pt-BR"
+                                />
+                                {Platform.OS === 'ios' && (
+                                    <TouchableOpacity
+                                        style={styles.confirmDateButton}
+                                        onPress={confirmIOSDate}
+                                    >
+                                        <Text style={styles.confirmDateButtonText}>Confirmar Data</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </>
+                        )}
+                        
+                        {showTimePicker && Platform.OS === 'android' && (
+                            <DateTimePicker
+                                value={tempDate}
+                                mode="time"
+                                is24Hour={true}
+                                display="default"
+                                onChange={handleTimeChange}
+                                locale="pt-BR"
+                            />
+                        )}
+                    </>
+                );
+
+            case 'switch':
+                return (
+                    <View style={styles.switchContainer}>
+                        <Text style={styles.switchLabel}>
+                            {newValue === 'true' ? 'Ativado' : 'Desativado'}
+                        </Text>
+                        <Switch
+                            value={newValue === 'true'}
+                            onValueChange={(val) => setNewValue(val.toString())}
+                            trackColor={{ false: '#ccc', true: '#F4A64E' }}
+                            thumbColor={newValue === 'true' ? '#fff' : '#f4f3f4'}
+                            disabled={saving}
+                        />
+                    </View>
+                );
+
+            case 'rfid':
+                const canUseRfid = isBluetoothEnabled && isLocationEnabled;
+
+                return (
+                    <>
+                        <View style={styles.valueInputContainer}>
+                            <TextInput
+                                style={[styles.input, styles.inputWithButton]}
+                                value={newValue}
+                                onChangeText={setNewValue}
+                                placeholder="Digite o novo valor"
+                                placeholderTextColor="#999"
+                                editable={!saving}
+                            />
+                            <TouchableOpacity
+                                style={[
+                                    styles.scanButton,
+                                    !canUseRfid && styles.scanButtonDisabled
+                                ]}
+                                onPress={handleOpenRfidScan}
+                                disabled={saving}
+                            >
+                                <MaterialCommunityIcons 
+                                    name={canUseRfid ? "radar" : "radio-off"} 
+                                    size={20} 
+                                    color="white" 
+                                />
+                                <Text style={styles.scanButtonText}>Escanear</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Indicadores de status */}
+                        <View style={styles.rfidStatusContainer}>
+                            <View style={styles.rfidStatusItem}>
+                                <Feather 
+                                    name={isBluetoothEnabled ? "check-circle" : "x-circle"} 
+                                    size={14} 
+                                    color={isBluetoothEnabled ? "#5ECC63" : "#FF6B6B"} 
+                                />
+                                <Text style={[
+                                    styles.rfidStatusText,
+                                    !isBluetoothEnabled && styles.rfidStatusTextError
+                                ]}>
+                                    Bluetooth {isBluetoothEnabled ? 'ativo' : 'inativo'}
+                                </Text>
+                            </View>
+                            
+                            <View style={styles.rfidStatusItem}>
+                                <Feather 
+                                    name={isLocationEnabled ? "check-circle" : "x-circle"} 
+                                    size={14} 
+                                    color={isLocationEnabled ? "#5ECC63" : "#FF6B6B"} 
+                                />
+                                <Text style={[
+                                    styles.rfidStatusText,
+                                    !isLocationEnabled && styles.rfidStatusTextError
+                                ]}>
+                                    Localização {isLocationEnabled ? 'ativa' : 'inativa'}
+                                </Text>
+                            </View>
+                        </View>
+
+                        {!canUseRfid && (
+                            <View style={styles.rfidWarning}>
+                                <Feather name="alert-triangle" size={16} color="#FF9800" />
+                                <Text style={styles.rfidWarningText}>
+                                    {!isBluetoothEnabled && !isLocationEnabled
+                                        ? 'Habilite o Bluetooth e a Localização para escanear'
+                                        : !isBluetoothEnabled
+                                        ? 'Habilite o Bluetooth para escanear'
+                                        : 'Habilite a Localização para escanear'}
+                                </Text>
+                            </View>
+                        )}
+                    </>
+                );
+
+            default:
+                return (
+                    <TextInput
+                        style={styles.input}
+                        value={newValue}
+                        onChangeText={setNewValue}
+                        placeholder="Digite o novo valor"
+                        placeholderTextColor="#999"
+                        editable={!saving}
+                    />
+                );
+        }
+    };
+
+    return (
+        <>
+            <Modal visible={visible} animationType="fade" transparent={true}>
+                <View style={styles.editValueOverlay}>
+                    <View style={styles.editValueModal}>
+                        <View style={styles.editValueHeader}>
+                            <Text style={styles.editValueTitle}>Editar Valor</Text>
+                            <TouchableOpacity onPress={onCancel} disabled={saving}>
+                                <Feather name="x" size={24} color="#333" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.editValueContent}>
+                            <Text style={styles.inputLabel}>Novo Valor *</Text>
+                            {renderValueInput()}
+                        </View>
+
+                        <View style={styles.editValueActions}>
+                            <TouchableOpacity 
+                                style={[styles.editValueButton, styles.cancelButton]} 
+                                onPress={onCancel}
+                                disabled={saving}
+                            >
+                                <Text style={styles.cancelButtonText}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[styles.editValueButton, styles.confirmButton, saving && styles.saveButtonDisabled]} 
+                                onPress={handleSave}
+                                disabled={saving}
+                            >
+                                {saving ? (
+                                    <ActivityIndicator size="small" color="white" />
+                                ) : (
+                                    <Text style={styles.confirmButtonText}>Salvar</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            <RFIDScanModal
+                visible={rfidScanModalVisible}
+                onClose={() => setRfidScanModalVisible(false)}
+                onRFIDScanned={handleRFIDScanned}
+            />
+        </>
+    );
+};
+
+// ... (resto do código continua igual - AttributeItem e AssetDetailScreen)
+// Por brevidade, continuando apenas com os styles atualizados
+
 const AttributeItem = ({
     attribute,
-    onPress,
-    onDelete
+    assetId,
+    onDelete,
+    onRefresh
 }: {
     attribute: AttributeDetail;
-    onPress: (attribute: AttributeDetail) => void;
+    assetId: string;
     onDelete: (attributeId: string) => void;
+    onRefresh: () => void;
 }) => {
+    const attributeService = new AttributeService();
+    const [editValueModalVisible, setEditValueModalVisible] = useState(false);
+    const [selectedValue, setSelectedValue] = useState<AttributeValue | null>(null);
+
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleDateString('pt-BR', {
             day: '2-digit',
             month: '2-digit',
             year: 'numeric'
+        });
+    };
+
+    const formatDateTime = (dateString: string) => {
+        return new Date(dateString).toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
         });
     };
 
@@ -221,8 +1445,60 @@ const AttributeItem = ({
         return `${Math.floor(diffInDays / 365)} anos atrás`;
     };
 
+    const formatValueDisplay = (valueObj: AttributeValue, type: string) => {
+        switch (type) {
+            case 'date':
+                return formatDateTime(valueObj.value);
+            case 'switch':
+                return valueObj.value === 'true' ? 'Ativado' : 'Desativado';
+            default:
+                return valueObj.value;
+        }
+    };
+
+    const handleEditValue = (valueObj: AttributeValue) => {
+        setSelectedValue(valueObj);
+        setEditValueModalVisible(true);
+    };
+
+    const handleSaveValue = async (newValue: string) => {
+        if (!selectedValue) return;
+
+        try {
+            await attributeService.updateAttributeValue(selectedValue.id, { value: newValue });
+            setEditValueModalVisible(false);
+            onRefresh();
+            Alert.alert("Sucesso", "Valor atualizado com sucesso!");
+        } catch (error) {
+            Alert.alert("Erro", "Falha ao atualizar valor.");
+        }
+    };
+
+    const handleDeleteValue = (valueId: string) => {
+        Alert.alert(
+            "Confirmar Exclusão",
+            "Tem certeza que deseja excluir este valor?",
+            [
+                { text: "Cancelar", style: "cancel" },
+                {
+                    text: "Excluir",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            await attributeService.deleteAttributeValue(valueId);
+                            onRefresh();
+                            Alert.alert("Sucesso", "Valor excluído com sucesso!");
+                        } catch (error) {
+                            Alert.alert("Erro", "Falha ao excluir valor.");
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     return (
-        <TouchableOpacity style={styles.attributeCard} onPress={() => onPress(attribute)}>
+        <View style={styles.attributeCard}>
             <View style={styles.attributeHeader}>
                 <View style={styles.attributeIcon}>
                     <Feather name="settings" size={18} color="#F4A64E" />
@@ -233,21 +1509,19 @@ const AttributeItem = ({
                 </View>
                 <View style={styles.attributeActions}>
                     <TouchableOpacity 
-                        onPress={(e) => {
-                            e.stopPropagation();
-                            onDelete(attribute.id);
-                        }} 
+                        onPress={() => onDelete(attribute.id)} 
                         style={styles.actionButton}
                     >
                         <Feather name="trash-2" size={16} color="#C62828" />
                     </TouchableOpacity>
-                    <Feather name="chevron-right" size={20} color="#ccc" style={{ marginLeft: 8 }} />
                 </View>
             </View>
 
             <View style={styles.attributeDetails}>
                 <View style={styles.attributeTag}>
-                    <Text style={styles.attributeTagText}>Tipo: {attribute.type}</Text>
+                    <Text style={styles.attributeTagText}>
+                        Tipo: {ATTRIBUTE_TYPES[attribute.type as keyof typeof ATTRIBUTE_TYPES] || attribute.type}
+                    </Text>
                 </View>
                 {attribute.unit && (
                     <View style={styles.attributeTag}>
@@ -278,29 +1552,60 @@ const AttributeItem = ({
                 <View style={styles.metadataRow}>
                     <View style={styles.metadataItem}>
                         <Feather name="clock" size={14} color="#666" />
-                        <Text style={styles.metadataLabel}>Última atualização:</Text>
+                        <Text style={styles.metadataLabel}>Atualizado:</Text>
                         <Text style={styles.metadataValue}>{getTimeAgo(attribute.updatedAt)}</Text>
                     </View>
                 </View>
+            </View>
 
-                {attribute.options && (
-                    <View style={styles.metadataRow}>
-                        <View style={styles.metadataItem}>
-                            <Feather name="list" size={14} color="#666" />
-                            <Text style={styles.metadataLabel}>Opções configuradas:</Text>
-                            <Text style={styles.metadataValue}>Sim</Text>
-                        </View>
+            {attribute.values && attribute.values.length > 0 && (
+                <View style={styles.valuesSection}>
+                    <View style={styles.valuesSectionHeader}>
+                        <Feather name="database" size={14} color="#666" />
+                        <Text style={styles.valuesSectionTitle}>
+                            Valores ({attribute.values.length})
+                        </Text>
                     </View>
-                )}
-            </View>
-
-            <View style={styles.attributeFooter}>
-                <Text style={styles.footerText}>Toque para gerenciar valores e configurações</Text>
-                <View style={styles.footerIcon}>
-                    <Feather name="arrow-right" size={16} color="#F4A64E" />
+                    {attribute.values.map((valueObj: AttributeValue) => (
+                        <View key={valueObj.id} style={styles.valueItem}>
+                            <View style={styles.valueIcon}>
+                                <Feather name="circle" size={8} color="#F4A64E" />
+                            </View>
+                            <View style={styles.valueContent}>
+                                <Text style={styles.valueText}>
+                                    {formatValueDisplay(valueObj, attribute.type)}
+                                </Text>
+                                <Text style={styles.valueDate}>
+                                    {formatDate(valueObj.createdAt)}
+                                </Text>
+                            </View>
+                            <View style={styles.valueActions}>
+                                <TouchableOpacity 
+                                    style={styles.valueActionButton}
+                                    onPress={() => handleEditValue(valueObj)}
+                                >
+                                    <Feather name="edit-2" size={14} color="#666" />
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={styles.valueActionButton}
+                                    onPress={() => handleDeleteValue(valueObj.id)}
+                                >
+                                    <Feather name="trash-2" size={14} color="#C62828" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    ))}
                 </View>
-            </View>
-        </TouchableOpacity>
+            )}
+
+            <EditValueModal
+                visible={editValueModalVisible}
+                value={selectedValue}
+                attributeType={attribute.type}
+                onSave={handleSaveValue}
+                onCancel={() => setEditValueModalVisible(false)}
+            />
+        </View>
     );
 };
 
@@ -317,6 +1622,7 @@ export default function AssetDetailScreen() {
     const [editData, setEditData] = useState<any>(null);
 
     const assetService = new AssetService();
+    const attributeService = new AttributeService();
 
     const fetchAssetDetails = useCallback(async () => {
         if (!assetId) return;
@@ -351,13 +1657,10 @@ export default function AssetDetailScreen() {
                     onPress: async () => {
                         try {
                             await assetService.deleteAsset(assetId);
-
-                            console.log(`Deletando ativo: ${assetId}`);
                             Alert.alert("Sucesso", "Ativo excluído com sucesso!");
                             navigation.goBack();
-                            
                         } catch (error) {
-                            Alert.alert("Error", "Não foi possível deletar o Asset!");
+                            Alert.alert("Erro", "Não foi possível deletar o Asset!");
                         }
                     }
                 }
@@ -373,9 +1676,7 @@ export default function AssetDetailScreen() {
 
     const handleSaveAsset = async (updatedAsset: any) => {
         try {
-            console.log('Salvando ativo atualizado:', updatedAsset);
             await assetService.updateAsset(assetId, updatedAsset);
-
             setAsset(updatedAsset);
             setEditModalVisible(false);
             Alert.alert("Sucesso", "Ativo atualizado com sucesso!");
@@ -387,49 +1688,49 @@ export default function AssetDetailScreen() {
     const handleAddAttribute = () => {
         setEditType('new-attribute');
         setEditData({
-            name: '',
-            description: '',
-            type: '',
-            unit: '',
-            timeUnit: '',
+            name: "",
+            description: "",
+            type: "",
+            unit: "",
+            timeUnit: "",
             required: false,
-            organizationId: asset?.organizationId || '',
-            authorId: asset?.creatorUserId || '',
+            value: "",
+            organizationId: asset?.organizationId || "",
+            authorId: asset?.creatorUserId || "",
         });
         setEditModalVisible(true);
     };
 
     const handleSaveNewAttribute = async (newAttribute: any) => {
         try {
-            console.log('Criando novo atributo:', newAttribute);
-            
-            const attributeWithId = {
-                ...newAttribute,
-                id: `attr_${Date.now()}`,
-                trashBin: false,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                options: null,
-                values: []
-            };
+            const createdAttribute = await attributeService.createAttribute({
+                organizationId: newAttribute.organizationId,
+                authorId: newAttribute.authorId,
+                name: newAttribute.name,
+                description: newAttribute.description,
+                type: newAttribute.type,
+                unit: newAttribute.unit || null,
+                timeUnit: newAttribute.timeUnit || null,
+                options: "sdsdsddssdsd",
+                required: newAttribute.required || false
+            });
 
-            if (asset) {
-                const updatedAttributes = [...asset.attributes, attributeWithId];
-                setAsset({ ...asset, attributes: updatedAttributes });
+            if (newAttribute.value && createdAttribute.id) {
+                await attributeService.createAttributeValue(
+                    createdAttribute.id,
+                    assetId,
+                    newAttribute.value
+                );
             }
 
+            await fetchAssetDetails();
+            
             setEditModalVisible(false);
             Alert.alert("Sucesso", "Atributo criado com sucesso!");
         } catch (error) {
+            console.error("Erro ao criar atributo:", error);
             Alert.alert("Erro", "Falha ao criar atributo.");
         }
-    };
-
-    const handleAttributePress = (attribute: AttributeDetail) => {
-        navigation.navigate('AttributeDetails', { 
-            attributeId: attribute.id,
-            assetId: assetId
-        });
     };
 
     const handleDeleteAttribute = (attributeId: string) => {
@@ -443,8 +1744,13 @@ export default function AssetDetailScreen() {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            console.log(`Deletando atributo: ${attributeId}`);
+                            await attributeService.deleteAttribute(attributeId);
 
+                            const attributeValueId = asset?.attributes.find(attr => attr.id === attributeId)
+                                ?.values.find(value => value.attributeId === attributeId)?.id;
+                                
+                            await attributeService.deleteAttributeValue(attributeValueId as string)
+                            
                             if (asset) {
                                 const updatedAttributes = asset.attributes.filter(attr => attr.id !== attributeId);
                                 setAsset({ ...asset, attributes: updatedAttributes });
@@ -510,7 +1816,6 @@ export default function AssetDetailScreen() {
     return (
         <SafeAreaView style={styles.safeArea}>
             <ScrollView style={styles.main} showsVerticalScrollIndicator={false}>
-                {/* Header do Ativo */}
                 <View style={styles.assetHeader}>
                     <View style={styles.assetTitleRow}>
                         <View style={styles.assetIcon}>
@@ -534,7 +1839,6 @@ export default function AssetDetailScreen() {
                     </View>
                 </View>
 
-                {/* Informações do Ativo */}
                 <View style={styles.infoSection}>
                     <Text style={styles.sectionTitle}>Informações</Text>
                     <View style={styles.infoGrid}>
@@ -561,7 +1865,6 @@ export default function AssetDetailScreen() {
                     </View>
                 </View>
 
-                {/* Seção de Atributos */}
                 <View style={styles.attributesSection}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Atributos ({asset.attributes.length})</Text>
@@ -576,8 +1879,9 @@ export default function AssetDetailScreen() {
                             <AttributeItem
                                 key={attribute.id}
                                 attribute={attribute}
-                                onPress={handleAttributePress}
+                                assetId={assetId}
                                 onDelete={handleDeleteAttribute}
+                                onRefresh={fetchAssetDetails}
                             />
                         ))
                     ) : (
@@ -597,13 +1901,13 @@ export default function AssetDetailScreen() {
                 visible={editModalVisible}
                 type={editType}
                 data={editData}
+                assetId={assetId}
                 onSave={handleSave}
                 onCancel={() => setEditModalVisible(false)}
             />
         </SafeAreaView>
     );
 }
-
 
 const styles = StyleSheet.create({
     safeArea: {
@@ -845,7 +2149,6 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#666',
     },
-    // ✅ Novos estilos para metadata
     attributeMetadata: {
         backgroundColor: '#f8f9fa',
         padding: 12,
@@ -872,23 +2175,62 @@ const styles = StyleSheet.create({
         color: '#333',
         fontWeight: '600',
     },
-    // ✅ Novos estilos para footer
-    attributeFooter: {
+    valuesSection: {
+        backgroundColor: '#F9F9F9',
+        padding: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+    },
+    valuesSectionHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingTop: 12,
-        borderTopWidth: 1,
-        borderTopColor: '#f0f0f0',
+        gap: 6,
+        marginBottom: 10,
     },
-    footerText: {
+    valuesSectionTitle: {
         fontSize: 13,
-        color: '#888',
-        fontStyle: 'italic',
+        fontWeight: '600',
+        color: '#666',
+    },
+    valueItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'white',
+        padding: 10,
+        borderRadius: 6,
+        marginBottom: 6,
+        borderLeftWidth: 3,
+        borderLeftColor: '#F4A64E',
+    },
+    valueIcon: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#FFF0E0',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 10,
+    },
+    valueContent: {
         flex: 1,
     },
-    footerIcon: {
-        marginLeft: 8,
+    valueText: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#333',
+        marginBottom: 2,
+    },
+    valueDate: {
+        fontSize: 11,
+        color: '#888',
+    },
+    valueActions: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    valueActionButton: {
+        padding: 6,
     },
     emptyAttributes: {
         alignItems: 'center',
@@ -920,7 +2262,7 @@ const styles = StyleSheet.create({
     },
     modalContainer: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#F5F5F5',
     },
     modalHeader: {
         flexDirection: 'row',
@@ -929,6 +2271,7 @@ const styles = StyleSheet.create({
         padding: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#e0e0e0',
+        backgroundColor: 'white',
     },
     modalTitle: {
         fontSize: 18,
@@ -940,6 +2283,11 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 6,
+        minWidth: 60,
+        alignItems: 'center',
+    },
+    saveButtonDisabled: {
+        backgroundColor: '#ccc',
     },
     saveButtonText: {
         color: 'white',
@@ -949,13 +2297,33 @@ const styles = StyleSheet.create({
         flex: 1,
         padding: 16,
     },
+    formSection: {
+        backgroundColor: 'white',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    formSectionTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 16,
+        paddingBottom: 8,
+        borderBottomWidth: 2,
+        borderBottomColor: '#F4A64E',
+    },
     inputGroup: {
-        marginBottom: 20,
+        marginBottom: 16,
     },
     inputLabel: {
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: '600',
-        color: '#333',
+        color: '#555',
         marginBottom: 8,
     },
     input: {
@@ -965,10 +2333,51 @@ const styles = StyleSheet.create({
         padding: 12,
         fontSize: 16,
         backgroundColor: 'white',
+        color: '#333',
     },
     textArea: {
         height: 100,
         textAlignVertical: 'top',
+    },
+    pickerContainer: {
+        borderWidth: 1,
+        borderColor: '#ddd',
+        borderRadius: 8,
+        backgroundColor: 'white',
+        overflow: 'hidden',
+    },
+    picker: {
+        height: 50,
+        color: '#333',
+    },
+    valueInputContainer: {
+        position: 'relative',
+    },
+    inputWithButton: {
+        paddingRight: 120,
+    },
+    scanButton: {
+        position: 'absolute',
+        right: 4,
+        top: 4,
+        bottom: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#F4A64E',
+        paddingHorizontal: 12,
+        borderRadius: 6,
+        gap: 6,
+    },
+    scanButtonText: {
+        color: 'white',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    inputHint: {
+        fontSize: 12,
+        color: '#888',
+        marginTop: 4,
+        fontStyle: 'italic',
     },
     checkboxContainer: {
         flexDirection: 'row',
@@ -996,15 +2405,361 @@ const styles = StyleSheet.create({
     helpText: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#f8f9fa',
+        backgroundColor: '#E3F2FD',
         padding: 12,
         borderRadius: 8,
         gap: 8,
         marginTop: 8,
+        marginBottom: 25,
+        borderLeftWidth: 3,
+        borderLeftColor: '#2196F3',
     },
     helpTextContent: {
         fontSize: 14,
-        color: '#666',
+        color: '#1565C0',
         flex: 1,
+    },
+    editValueOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    editValueModal: {
+        backgroundColor: 'white',
+        borderRadius: 12,
+        width: '100%',
+        maxWidth: 400,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+    editValueHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e0e0e0',
+    },
+    editValueTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#333',
+    },
+    editValueContent: {
+        padding: 16,
+    },
+    editValueActions: {
+        flexDirection: 'row',
+        padding: 16,
+        gap: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#e0e0e0',
+    },
+    editValueButton: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    cancelButton: {
+        backgroundColor: '#f0f0f0',
+    },
+    confirmButton: {
+        backgroundColor: '#F4A64E',
+    },
+    cancelButtonText: {
+        color: '#666',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    confirmButtonText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    dateButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    dateButtonText: {
+        fontSize: 16,
+        color: '#333',
+    },
+    dateButtonPlaceholder: {
+        color: '#999',
+    },
+    confirmDateButton: {
+        backgroundColor: '#F4A64E',
+        padding: 12,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginTop: 8,
+    },
+    confirmDateButtonText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    switchContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'white',
+        padding: 12,
+        borderWidth: 1,
+        borderColor: '#ddd',
+        borderRadius: 8,
+    },
+    switchLabel: {
+        fontSize: 16,
+        color: '#333',
+        fontWeight: '500',
+    },
+    selectTypeFirst: {
+        fontSize: 14,
+        color: '#999',
+        fontStyle: 'italic',
+        padding: 12,
+        backgroundColor: '#f8f9fa',
+        borderRadius: 8,
+        textAlign: 'center',
+    },
+
+    // Estilos do Modal de Scan RFID
+    scanModalContainer: {
+        flex: 1,
+        backgroundColor: '#F5F5F5',
+    },
+    scanModalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e0e0e0',
+        backgroundColor: 'white',
+    },
+    scanModalTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#333',
+    },
+    scanModalContent: {
+        flex: 1,
+        padding: 16,
+    },
+    rfidScanHeader: {
+        alignItems: 'center',
+        paddingVertical: 30,
+    },
+    rfidScanIcon: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#FFF0E0',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    rfidScanTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 8,
+    },
+    rfidScanSubtitle: {
+        fontSize: 14,
+        color: '#666',
+        textAlign: 'center',
+    },
+    rfidStatusContainer: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 8,
+        marginBottom: 4,
+    },
+    rfidStatusItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    rfidStatusText: {
+        fontSize: 12,
+        color: '#666',
+    },
+    rfidStatusTextError: {
+        color: '#FF6B6B',
+    },
+    rfidWarning: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: '#FFF3E0',
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 8,
+        borderLeftWidth: 3,
+        borderLeftColor: '#FF9800',
+    },
+    rfidWarningText: {
+        flex: 1,
+        fontSize: 13,
+        color: '#E65100',
+        lineHeight: 18,
+    },
+    scanButtonDisabled: {
+        backgroundColor: '#ccc',
+        opacity: 0.6,
+    },
+    scanActionButtons: {
+        paddingVertical: 16,
+    },
+    scanActionButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F4A64E',
+        paddingVertical: 14,
+        borderRadius: 8,
+        gap: 8,
+    },
+    scanActionButtonActive: {
+        backgroundColor: '#FF6B6B',
+    },
+    scanActionButtonText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    devicesList: {
+        flex: 1,
+    },
+    emptyDevices: {
+        alignItems: 'center',
+        paddingVertical: 60,
+        gap: 16,
+    },
+    emptyDevicesText: {
+        fontSize: 16,
+        color: '#666',
+        textAlign: 'center',
+    },
+    devicesListTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 12,
+    },
+    deviceCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'white',
+        padding: 14,
+        borderRadius: 12,
+        marginBottom: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    deviceCardConnecting: {
+        backgroundColor: '#FFF8E1',
+        borderWidth: 2,
+        borderColor: '#F4A64E',
+    },
+    deviceCardIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#FFF0E0',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    deviceCardInfo: {
+        flex: 1,
+    },
+    deviceCardName: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 4,
+    },
+    deviceCardAddress: {
+        fontSize: 12,
+        color: '#888',
+        fontFamily: 'monospace',
+    },
+    rfidScanningContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 40,
+    },
+    rfidScanningTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 8,
+    },
+    rfidScanningSubtitle: {
+        fontSize: 16,
+        color: '#666',
+        textAlign: 'center',
+    },
+    connectedDeviceInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#E8F5E9',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        marginTop: 20,
+        gap: 8,
+    },
+    connectedDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#4CAF50',
+    },
+    connectedDeviceText: {
+        fontSize: 14,
+        color: '#2E7D32',
+        fontWeight: '600',
+    },
+    scanningInstruction: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#E3F2FD',
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 30,
+        gap: 8,
+    },
+    scanningInstructionText: {
+        fontSize: 14,
+        color: '#1565C0',
+        flex: 1,
+    },
+    cancelScanButton: {
+        backgroundColor: '#FFEBEE',
+        paddingVertical: 14,
+        borderRadius: 8,
+        alignItems: 'center',
+        borderWidth: 2,
+        borderColor: '#F44336',
+    },
+    cancelScanButtonText: {
+        color: '#F44336',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });

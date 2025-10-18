@@ -9,7 +9,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OrganizationService } from '../../services/organization.service';
 import { AssetService } from '../../services/asset.service';
 import { Organization } from '../../models/organization.model';
-import { Asset, AttributeDetail } from '../../models/asset.model';
 import { RootStackNavigationProp } from '../../models/stackType';
 import { AttributeService } from '../../services/attribute.service';
 
@@ -22,8 +21,7 @@ interface AssetWithRFID {
 
 const AssetSelectionScreen = () => {
     const navigation = useNavigation<RootStackNavigationProp>();
-    const [organizations, setOrganizations] = useState<Organization[]>([]);
-    const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
+    const [organization, setOrganization] = useState<Organization>();
     const [assetsWithRFID, setAssetsWithRFID] = useState<AssetWithRFID[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadingAssets, setLoadingAssets] = useState(false);
@@ -34,13 +32,17 @@ const AssetSelectionScreen = () => {
     const attributeService = new AttributeService();
 
     useEffect(() => {
-        loadOrganizations();
+        loadOrganizationInfo();
     }, []);
 
-    const loadOrganizations = async () => {
+    const loadOrganizationInfo = async () => {
         try {
-            const orgs = await organizationService.getAllOrganizations();
-            setOrganizations(orgs || []);
+            const organizationId = await AsyncStorage.getItem("organizationId") as string;
+            const orgs = await organizationService.getOrganizationById(organizationId);
+            setOrganization(orgs || {});
+            setAssetsWithRFID([]);
+            
+            await loadAssetsWithRFID(organizationId);
         } catch (error) {
             Alert.alert('Erro', 'Não foi possível carregar as organizações');
         } finally {
@@ -59,8 +61,7 @@ const AssetSelectionScreen = () => {
                 const assetInfo = await assetService.getAssetInfo(asset.id);
                 const attributes = assetInfo.attributes.filter(
                     attr => attr.organizationId === orgId &&
-                        attr.name.toLowerCase().includes('rfid') &&
-                        attr.name.toLowerCase().includes('tag')
+                        attr.type === "rfid"
                 )
 
                 for(const attribute of attributes) {
@@ -86,12 +87,6 @@ const AssetSelectionScreen = () => {
         } finally {
             setLoadingAssets(false);
         }
-    };
-
-    const handleSelectOrganization = (org: Organization) => {
-        setSelectedOrg(org);
-        setAssetsWithRFID([]);
-        loadAssetsWithRFID(org.id);
     };
 
     const toggleAssetSelection = (assetId: string) => {
@@ -127,7 +122,7 @@ const AssetSelectionScreen = () => {
         setSaving(true);
         try {
             const dataToSave = {
-                organization: selectedOrg!.name,
+                organization: organization!.name,
                 assets: selectedAssets.map(asset => ({
                     asset_name: asset.name,
                     rfid_tag: asset.rfidTag
@@ -153,61 +148,8 @@ const AssetSelectionScreen = () => {
         }
     };
 
-    const renderHeader = () => (
-        <View style={styles.headerSection}>
-            <View style={styles.headerIcon}>
-                <MaterialCommunityIcons name="package-variant-closed" size={32} color="#4CAF50" />
-            </View>
-            <Text style={styles.title}>Selecionar Ativos</Text>
-            <Text style={styles.subtitle}>
-                Escolha a organização e os ativos para verificação RFID
-            </Text>
-        </View>
-    );
-
-    const renderOrganizationSelection = () => (
-        <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>1. Escolha a Organização</Text>
-            </View>
-
-            {selectedOrg ? (
-                <View style={styles.selectedOrgCard}>
-                    <View style={styles.orgIcon}>
-                        <MaterialCommunityIcons name="office-building" size={24} color="#2196F3" />
-                    </View>
-                    <View style={styles.orgInfo}>
-                        <Text style={styles.orgName}>{selectedOrg.name}</Text>
-                        <Text style={styles.orgDescription}>{selectedOrg.description}</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => setSelectedOrg(null)} style={styles.changeButton}>
-                        <Feather name="edit-2" size={16} color="#F4A64E" />
-                    </TouchableOpacity>
-                </View>
-            ) : (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orgScrollView}>
-                    {organizations.map(org => (
-                        <TouchableOpacity
-                            key={org.id}
-                            style={styles.orgCard}
-                            onPress={() => handleSelectOrganization(org)}
-                        >
-                            <View style={styles.orgCardIcon}>
-                                <MaterialCommunityIcons name="office-building" size={20} color="#2196F3" />
-                            </View>
-                            <Text style={styles.orgCardName}>{org.name}</Text>
-                            <Text style={styles.orgCardDescription} numberOfLines={2}>
-                                {org.description}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
-            )}
-        </View>
-    );
-
     const renderAssetSelection = () => {
-        if (!selectedOrg) return null;
+        if (!organization) return null;
 
         const selectedCount = assetsWithRFID.filter(asset => asset.selected).length;
 
@@ -215,7 +157,7 @@ const AssetSelectionScreen = () => {
             <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>
-                        2. Selecione os Ativos ({selectedCount}/{assetsWithRFID.length})
+                        Selecione os Ativos ({selectedCount}/{assetsWithRFID.length})
                     </Text>
                     {assetsWithRFID.length > 0 && (
                         <View style={styles.bulkActions}>
@@ -239,7 +181,7 @@ const AssetSelectionScreen = () => {
                         <View style={styles.rfidInfo}>
                             <Feather name="info" size={16} color="#2196F3" />
                             <Text style={styles.rfidInfoText}>
-                                Mostrando apenas ativos com atributo "RFID TAG" configurado
+                                Mostrando apenas ativos com atributo com o tipo "RFID"
                             </Text>
                         </View>
                         <View style={styles.assetsList}>
@@ -286,7 +228,7 @@ const AssetSelectionScreen = () => {
 
     const renderActions = () => {
         const selectedCount = assetsWithRFID.filter(asset => asset.selected).length;
-        const canSave = selectedOrg && selectedCount > 0;
+        const canSave = selectedCount > 0;
 
         return (
             <View style={styles.actionsSection}>
@@ -320,8 +262,8 @@ const AssetSelectionScreen = () => {
         return (
             <SafeAreaView style={styles.safeArea}>
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#4CAF50" />
-                    <Text style={styles.loadingText}>Carregando organizações...</Text>
+                    <ActivityIndicator size="large" color="#F4A64E" />
+                    <Text style={styles.loadingText}>Carregando Ativos...</Text>
                 </View>
             </SafeAreaView>
         );
@@ -330,8 +272,26 @@ const AssetSelectionScreen = () => {
     return (
         <SafeAreaView style={styles.safeArea}>
             <ScrollView style={styles.main} showsVerticalScrollIndicator={false}>
-                {renderHeader()}
-                {renderOrganizationSelection()}
+                <View style={styles.headerSection}>
+                    <View style={styles.headerIcon}>
+                        <MaterialCommunityIcons name="package-variant-closed" size={32} color="#F4A64E" />
+                    </View>
+                    <Text style={styles.title}>Selecionar Ativos</Text>
+                    <Text style={styles.subtitle}>
+                        Escolha os ativos para verificação RFID
+                    </Text>
+                </View>
+                <View style={styles.section}>
+                    <View style={styles.selectedOrgCard}>
+                        <View style={styles.orgIcon}>
+                            <MaterialCommunityIcons name="office-building" size={24} color="#2196F3" />
+                        </View>
+                        <View style={styles.orgInfo}>
+                            <Text style={styles.orgName}>{organization!.name}</Text>
+                            <Text style={styles.orgDescription}>{organization!.description}</Text>
+                        </View>
+                    </View>
+                </View>
                 {renderAssetSelection()}
                 {renderActions()}
             </ScrollView>
@@ -462,44 +422,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    orgScrollView: {
-        marginHorizontal: -20,
-        paddingHorizontal: 20,
-        paddingVertical: 10,
-    },
-    orgCard: {
-        backgroundColor: 'white',
-        borderRadius: 12,
-        padding: 16,
-        marginRight: 12,
-        width: 160,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    orgCardIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: '#E3F2FD',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 12,
-    },
-    orgCardName: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#333',
-        marginBottom: 4,
-    },
-    orgCardDescription: {
-        fontSize: 12,
-        color: '#666',
-        lineHeight: 16,
-    },
-
     // Asset Selection
     bulkActions: {
         flexDirection: 'row',
