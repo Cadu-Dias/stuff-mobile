@@ -11,9 +11,10 @@ import {
   UIManager,
   Platform,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { RootStackNavigationProp } from '../../models/stackType';
 import useBLE from '../../hooks/useBle';
 import { RfidStatusItem } from '../../models/rfids/rfidStatusItem';
@@ -22,7 +23,6 @@ import { SelectedAssets } from '../../models/asset.model';
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-
 
 type StorageScanScreenProps = {
   route: { 
@@ -36,21 +36,30 @@ type StorageScanScreenProps = {
 const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
   const { deviceAddress, selectedAssets } = route.params;
   const navigator = useNavigation<RootStackNavigationProp>();
+  const isFocused = useIsFocused();
   
   const { connectToDevice, disconnectFromDevice, connectedDevice, scannedRfids } = useBLE();
 
   const [isConnectionFailed, setIsConnectionFailed] = useState(false);
   const [countdown, setCountdown] = useState(5);
-  const [scanStartTime, setScanStartTime] = useState<Date | null>(null);
   const [scanDuration, setScanDuration] = useState(0);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isFinishing, setIsFinishing] = useState(false);
+  const [finishingCountdown, setFinishingCountdown] = useState(3);
+  
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const finishingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const finishingCountdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pulseAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const hasTriedConnection = useRef(false);
 
   const [rfidStatusList, setRfidStatusList] = useState<RfidStatusItem[]>(() => {
     if (selectedAssets && selectedAssets.assets) {
       return selectedAssets.assets.map(asset => ({
-        name: asset.asset_name,
-        rfid: asset.rfid_tag,
+        id: asset.assetId,
+        name: asset.assetName,
+        rfid: asset.rfidTag,
         scanned: false
       }));
     }
@@ -61,126 +70,280 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
   const totalCount = rfidStatusList.length;
   const progress = totalCount > 0 ? (scannedCount / totalCount) * 100 : 0;
 
-  useEffect(() => {
-    if (isConnectionFailed) {
-      intervalRef.current = setInterval(() => {
-        setCountdown((prevCount) => prevCount - 1);
-      }, 1000);
-    }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [isConnectionFailed]);
-
-  useEffect(() => {
-    if (countdown <= 0) {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      navigator.goBack();
-    }
-  }, [countdown, navigator]);
-
-  // Timer do scan
-  useEffect(() => {
-    if (connectedDevice && !scanStartTime) {
-      setScanStartTime(new Date());
-      durationIntervalRef.current = setInterval(() => {
-        setScanDuration(prev => prev + 1);
-      }, 1000);
-    }
-    
-    return () => {
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-      }
-    };
-  }, [connectedDevice, scanStartTime]);
-
-  const handleInterruptScan = () => {
+  // Cleanup de todos os timers
+  const cleanupTimers = useCallback(() => {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
     }
-    navigator.navigate('ResultsScreen', {
-      results: rfidStatusList,
-      deviceAddress: deviceAddress,
+    if (finishingTimeoutRef.current) {
+      clearTimeout(finishingTimeoutRef.current);
+      finishingTimeoutRef.current = null;
+    }
+    if (finishingCountdownIntervalRef.current) {
+      clearInterval(finishingCountdownIntervalRef.current);
+      finishingCountdownIntervalRef.current = null;
+    }
+  }, []);
+
+  // Countdown para falha de conexão
+  useEffect(() => {
+    if (isConnectionFailed) {
+      countdownIntervalRef.current = setInterval(() => {
+        setCountdown((prevCount) => {
+          if (prevCount <= 1) {
+            if (countdownIntervalRef.current) {
+              clearInterval(countdownIntervalRef.current);
+            }
+            navigator.goBack();
+            return 0;
+          }
+          return prevCount - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
+    };
+  }, [isConnectionFailed, navigator]);
+
+  useEffect(() => {
+    if (!isFocused) {
+      return;
+    }
+
+    const tryToConnect = async () => {
+      if (hasTriedConnection.current || isFinishing || connectedDevice) {
+        return;
+      }
+
+      hasTriedConnection.current = true;
+
+      try {
+        console.log("🔌 Tentando conectar ao dispositivo:", deviceAddress);
+        await connectToDevice(deviceAddress);
+        console.log("✅ Conectado com sucesso");
+      } catch (error) {
+        console.error("❌ Falha ao conectar:", error);
+        setIsConnectionFailed(true);
+        hasTriedConnection.current = false;
+      }
+    };
+
+    tryToConnect();
+
+    return () => {
+      console.log("👋 Cleanup da tela");
+      cleanupTimers();
+      if (pulseAnimRef.current) {
+        pulseAnimRef.current.stop();
+      }
+      if (!isFinishing && hasTriedConnection.current) {
+        console.log("🔌 Desconectando dispositivo...");
+        disconnectFromDevice();
+        hasTriedConnection.current = false;
+      }
+    };
+  }, [isFocused]); // Apenas isFocused como dependência
+
+  // Timer de duração do scan
+  useEffect(() => {
+    if (!connectedDevice || isFinishing || durationIntervalRef.current) {
+      return;
+    }
+
+    console.log('✅ Iniciando timer de scan');
+    setIsScanning(true);
+    setScanDuration(0);
+    
+    durationIntervalRef.current = setInterval(() => {
+      setScanDuration(prev => prev + 1);
+    }, 1000);
+
+    return () => {
+      if (durationIntervalRef.current) {
+        console.log('🛑 Parando timer de scan');
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
+    };
+  }, [connectedDevice, isFinishing]);
+
+  // Navegar para resultados após desconectar
+  const navigateToResults = useCallback((results: RfidStatusItem[]) => {
+    console.log('📊 Navegando para tela de resultados...');
+    cleanupTimers();
+    
+    navigator.navigate('ResultsScreen', { 
+      results, 
+      deviceAddress,
       selectedAssets: selectedAssets as SelectedAssets
     });
+  }, [navigator, deviceAddress, selectedAssets, cleanupTimers]);
+
+  // Finalizar scan (todos os itens encontrados)
+  const finishScan = useCallback(async (allItems: RfidStatusItem[]) => {
+    if (isFinishing) return;
+    
+    console.log('🏁 Todos os itens escaneados! Iniciando finalização...');
+    setIsFinishing(true);
+    setFinishingCountdown(3);
+    
+    // Timer visual de countdown
+    finishingCountdownIntervalRef.current = setInterval(() => {
+      setFinishingCountdown((prev) => {
+        if (prev <= 1) {
+          if (finishingCountdownIntervalRef.current) {
+            clearInterval(finishingCountdownIntervalRef.current);
+            finishingCountdownIntervalRef.current = null;
+          }
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // Timeout para desconectar e navegar
+    finishingTimeoutRef.current = setTimeout(async () => {
+      console.log('⏱️ Timeout finalizado, desconectando dispositivo...');
+      
+      await disconnectFromDevice();
+      
+      setTimeout(() => {
+        console.log('✅ Dispositivo desconectado, navegando...');
+        navigateToResults(allItems);
+      }, 500);
+    }, 3000);
+  }, [isFinishing, disconnectFromDevice, navigateToResults]);
+
+  // Parar verificação manualmente
+  const handleInterruptScan = () => {
+    Alert.alert(
+      'Parar Verificação',
+      'Deseja realmente parar a verificação? O progresso atual será salvo.',
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel'
+        },
+        {
+          text: 'Parar',
+          style: 'destructive',
+          onPress: async () => {
+            console.log('🛑 Usuário interrompeu o scan');
+            setIsFinishing(true);
+            cleanupTimers();
+            
+            await disconnectFromDevice();
+            setTimeout(() => {
+              navigateToResults(rfidStatusList);
+            }, 500);
+          }
+        }
+      ]
+    );
   };
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
-
-  useFocusEffect(
-    useCallback(() => {
-      const tryToConnect = async () => {
-        try {
-          console.log("Tentando conectar ao dispositivo:", deviceAddress);
-          await connectToDevice(deviceAddress);
-        } catch (error) {
-          console.error("Falha ao conectar:", error);
-          setIsConnectionFailed(true);
-        }
-      };
-
-      if (deviceAddress) {
-        tryToConnect();
-      }
-      
-      return () => {
-        console.log("Tela perdeu o foco, desconectando...");
-        disconnectFromDevice();
-        if (durationIntervalRef.current) {
-          clearInterval(durationIntervalRef.current);
-        }
-      };
-    }, [deviceAddress])
-  );
+  const finishAnim = useRef(new Animated.Value(0)).current;
   
+  // Animação de pulso
   useEffect(() => {
-    if (connectedDevice) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.1, duration: 1500, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
-        ])
-      ).start();
+    if (!connectedDevice || isFinishing) {
+      if (pulseAnimRef.current) {
+        pulseAnimRef.current.stop();
+      }
+      pulseAnim.setValue(1);
+      return;
     }
-  }, [connectedDevice, pulseAnim]);
 
-  // Anima o progresso
+    console.log('🎬 Iniciando animação de pulso');
+    
+    pulseAnimRef.current = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { 
+          toValue: 1.15, 
+          duration: 1000, 
+          useNativeDriver: true 
+        }),
+        Animated.timing(pulseAnim, { 
+          toValue: 1, 
+          duration: 1000, 
+          useNativeDriver: true 
+        }),
+      ])
+    );
+    
+    pulseAnimRef.current.start();
+
+    return () => {
+      if (pulseAnimRef.current) {
+        pulseAnimRef.current.stop();
+      }
+    };
+  }, [connectedDevice, isFinishing]);
+
+  // Animação de finalização
   useEffect(() => {
-    Animated.timing(progressAnim, {
+    if (!isFinishing) return;
+
+    const finishAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(finishAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(finishAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    
+    finishAnimation.start();
+
+    return () => {
+      finishAnimation.stop();
+    };
+  }, [isFinishing]);
+
+  useEffect(() => {
+    Animated.spring(progressAnim, {
       toValue: progress,
-      duration: 500,
+      friction: 8,
+      tension: 40,
       useNativeDriver: false,
     }).start();
-  }, [progress, progressAnim]);
+  }, [progress]);
 
-  useFocusEffect(
-    useCallback(() => {
-      const needsUpdate = rfidStatusList.some(item => !item.scanned && scannedRfids.includes(item.rfid));
-      if (needsUpdate) {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        const newList = rfidStatusList.map(item =>
-          !item.scanned && scannedRfids.includes(item.rfid) ? { ...item, scanned: true } : item
-        );
-        setRfidStatusList(newList);
-        
-        // Navega para resultados quando todos foram encontrados
-        if (newList.every(item => item.scanned)) {
-          setTimeout(() => {
-            if (durationIntervalRef.current) {
-              clearInterval(durationIntervalRef.current);
-            }
-            navigator.navigate('ResultsScreen', { 
-              results: newList, 
-              deviceAddress,
-              selectedAssets: selectedAssets as SelectedAssets
-            });
-          }, 1000); // Pequeno delay para mostrar o último item encontrado
-        }
+  useEffect(() => {
+    if (isFinishing) return;
+    
+    const needsUpdate = rfidStatusList.some(
+      item => !item.scanned && scannedRfids.includes(item.rfid)
+    );
+    
+    if (needsUpdate) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      const newList = rfidStatusList.map(item =>
+        !item.scanned && scannedRfids.includes(item.rfid) 
+          ? { ...item, scanned: true } 
+          : item
+      );
+      setRfidStatusList(newList);
+      
+      const allFound = newList.every(item => item.scanned);
+      if (allFound) {
+        console.log('🎉 Todos os itens foram encontrados!');
+        finishScan(newList);
       }
-    }, [scannedRfids, navigator, rfidStatusList, deviceAddress])
-  );
+    }
+  }, [scannedRfids, isFinishing]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -193,14 +356,15 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.main}>
           <View style={styles.errorContainer}>
-            <View style={styles.errorIcon}>
-              <Feather name="alert-triangle" size={48} color="#F44336" />
+            <View style={styles.errorIconContainer}>
+              <MaterialCommunityIcons name="bluetooth-off" size={64} color="#F44336" />
             </View>
             <Text style={styles.errorTitle}>Falha na Conexão</Text>
             <Text style={styles.errorMessage}>
-              Não foi possível conectar ao dispositivo. Verifique se ele está ligado e ao alcance.
+              Não foi possível conectar ao dispositivo. Verifique se ele está ligado e próximo.
             </Text>
-            <View style={styles.countdownContainer}>
+            <View style={styles.countdownBadge}>
+              <MaterialCommunityIcons name="timer-sand" size={20} color="#FF9800" />
               <Text style={styles.countdownText}>
                 Voltando em {countdown}s
               </Text>
@@ -215,84 +379,154 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
 
   const renderHeader = () => (
     <View style={styles.headerSection}>
-      <View style={styles.headerInfo}>
-        <Text style={styles.headerTitle}>Verificação RFID</Text>
-        <Text style={styles.headerSubtitle}>
-          {selectedAssets?.organization || 'Organização'}
-        </Text>
-      </View>
-      {isConnected && (
-        <View style={styles.timerContainer}>
-          <MaterialCommunityIcons name="timer" size={16} color="#666" />
-          <Text style={styles.timerText}>{formatDuration(scanDuration)}</Text>
+      <View style={styles.headerTop}>
+        <View style={styles.headerInfo}>
+          <Text style={styles.headerTitle}>Verificação RFID</Text>
+          <Text style={styles.headerSubtitle}>
+            {selectedAssets?.organizationName || 'Organização'}
+          </Text>
         </View>
-      )}
+        
+        <View style={styles.headerRight}>
+          <View style={[
+            styles.statusBadge,
+            isFinishing && styles.statusBadgeFinishing
+          ]}>
+            <View style={[
+              styles.statusDot, 
+              isConnected && !isFinishing && styles.statusDotConnected,
+              isFinishing && styles.statusDotFinishing
+            ]} />
+            <Text style={styles.statusText}>
+              {isFinishing ? 'Finalizando' : isConnected ? 'Conectado' : 'Conectando...'}
+            </Text>
+          </View>
+          
+          {isConnected && !isFinishing && (
+            <View style={styles.timerBadge}>
+              <MaterialCommunityIcons name="timer-outline" size={16} color="#666" />
+              <Text style={styles.timerText}>{formatDuration(scanDuration)}</Text>
+            </View>
+          )}
+        </View>
+      </View>
     </View>
   );
 
   const renderScanner = () => (
     <View style={styles.scannerSection}>
-      <Animated.View style={[styles.scannerContainer, { transform: [{ scale: pulseAnim }] }]}>
-        <View style={[
-          styles.scannerCircle,
-          isConnected && styles.scannerCircleConnected
-        ]}>
-          {!isConnected ? (
-            <>
-              <ActivityIndicator size="large" color="white" />
-              <Text style={styles.scannerStatusText}>Conectando...</Text>
-            </>
-          ) : (
-            <>
-              <MaterialCommunityIcons name="radar" size={40} color="white" />
-              <Text style={styles.scannerStatusText}>Escaneando</Text>
-              <Text style={styles.scannerDeviceName}>
-                {connectedDevice?.name || 'Dispositivo RFID'}
-              </Text>
-            </>
-          )}
+      {isFinishing ? (
+        <View style={styles.finishingContainer}>
+          <Animated.View style={[
+            styles.finishingCircle,
+            {
+              opacity: finishAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.5, 1],
+              })
+            }
+          ]}>
+            <MaterialCommunityIcons name="check-circle" size={64} color="white" />
+            <Text style={styles.finishingText}>Scan Completo!</Text>
+            <Text style={styles.finishingSubtext}>
+              Finalizando em {finishingCountdown}s
+            </Text>
+          </Animated.View>
+          
+          <View style={styles.finishingInfo}>
+            <ActivityIndicator size="small" color="#4CAF50" />
+            <Text style={styles.finishingInfoText}>
+              Desconectando dispositivo e preparando resultados...
+            </Text>
+          </View>
         </View>
-      </Animated.View>
+      ) : (
+        <>
+          <Animated.View style={[
+            styles.scannerContainer, 
+            { transform: [{ scale: pulseAnim}] }
+          ]}>
+            <View style={[
+              styles.scannerCircle,
+              isConnected && styles.scannerCircleConnected
+            ]}>
+              {!isConnected ? (
+                <>
+                  <ActivityIndicator size="large" color="white" />
+                  <Text style={styles.scannerStatusText}>Conectando...</Text>
+                </>
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="radar" size={48} color="white" />
+                  <Text style={styles.scannerStatusText}>Escaneando</Text>
+                  <Text style={styles.scannerDeviceName}>
+                    {connectedDevice?.name || 'Leitor RFID'}
+                  </Text>
+                </>
+              )}
+            </View>
+            
+            {isConnected && (
+              <>
+                <View style={[styles.radarWave, styles.radarWave1]} />
+                <View style={[styles.radarWave, styles.radarWave2]} />
+                <View style={[styles.radarWave, styles.radarWave3]} />
+              </>
+            )}
+          </Animated.View>
 
-      {isConnected && (
-        <View style={styles.progressSection}>
-          <View style={styles.progressInfo}>
-            <Text style={styles.progressText}>
-              {scannedCount} de {totalCount} encontrados
-            </Text>
-            <Text style={styles.progressPercentage}>
-              {Math.round(progress)}%
-            </Text>
-          </View>
-          <View style={styles.progressBarContainer}>
-            <Animated.View 
-              style={[
-                styles.progressBar,
-                {
-                  width: progressAnim.interpolate({
-                    inputRange: [0, 100],
-                    outputRange: ['0%', '100%'],
-                  })
-                }
-              ]} 
-            />
-          </View>
-        </View>
+          {isConnected && (
+            <View style={styles.progressSection}>
+              <View style={styles.progressHeader}>
+                <Text style={styles.progressText}>Progresso</Text>
+                <Text style={styles.progressPercentage}>{Math.round(progress)}%</Text>
+              </View>
+              
+              <View style={styles.progressBarContainer}>
+                <Animated.View 
+                  style={[
+                    styles.progressBar,
+                    {
+                      width: progressAnim.interpolate({
+                        inputRange: [0, 100],
+                        outputRange: ['0%', '100%'],
+                      }),
+                      backgroundColor: progress === 100 ? '#4CAF50' : '#F4A64E'
+                    }
+                  ]} 
+                />
+              </View>
+              
+              <View style={styles.progressStats}>
+                <View style={styles.progressStat}>
+                  <Feather name="check-circle" size={14} color="#4CAF50" />
+                  <Text style={styles.progressStatText}>{scannedCount} encontrados</Text>
+                </View>
+                <View style={styles.progressStat}>
+                  <Feather name="circle" size={14} color="#FF9800" />
+                  <Text style={styles.progressStatText}>{totalCount - scannedCount} pendentes</Text>
+                </View>
+              </View>
+            </View>
+          )}
+        </>
       )}
     </View>
   );
 
   const renderSectionTitle = () => (
-    <View style={styles.sectionTitleContainer}>
+    <View style={styles.sectionHeader}>
+      <MaterialCommunityIcons name="package-variant-closed" size={20} color="#333" />
       <Text style={styles.sectionTitle}>
-        Itens para Verificação ({totalCount})
+        Itens ({scannedCount}/{totalCount})
       </Text>
     </View>
   );
 
   const renderRfidItem = ({ item, index }: { item: RfidStatusItem; index: number }) => {
     const isScanned = item.scanned;
-    const isRecent = isScanned && scannedRfids.indexOf(item.rfid) >= scannedRfids.length - 3;
+    const itemPosition = scannedRfids.indexOf(item.rfid);
+    const isRecent = isScanned && itemPosition >= scannedRfids.length - 3 && !isFinishing;
     
     return (
       <Animated.View style={[
@@ -300,52 +534,69 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
         isScanned && styles.rfidCardScanned,
         isRecent && styles.rfidCardRecent
       ]}>
-        <View style={styles.rfidHeader}>
-          <View style={styles.rfidIndex}>
-            <Text style={styles.rfidIndexText}>#{index + 1}</Text>
+        <View style={styles.rfidCardContent}>
+          <View style={styles.rfidLeft}>
+            <View style={[
+              styles.rfidStatusIcon,
+              isScanned && styles.rfidStatusIconScanned
+            ]}>
+              {isScanned ? (
+                <Feather name="check" size={18} color="white" />
+              ) : (
+                <MaterialCommunityIcons name="scanner-off" size={18} color="#999" />
+              )}
+            </View>
+            
+            <View style={styles.rfidInfo}>
+              <Text style={[
+                styles.rfidName,
+                isScanned && styles.rfidNameScanned
+              ]}>
+                {item.name}
+              </Text>
+              <View style={styles.rfidTagContainer}>
+                <MaterialCommunityIcons name="tag" size={12} color="#999" />
+                <Text style={styles.rfidTag}>{item.rfid}</Text>
+              </View>
+            </View>
           </View>
-          <View style={[
-            styles.rfidStatus,
-            isScanned && styles.rfidStatusScanned
-          ]}>
-            {isScanned ? (
-              <Feather name="check-circle" size={20} color="#4CAF50" />
-            ) : (
-              <MaterialCommunityIcons name="radar" size={20} color="#ccc" />
+
+          <View style={styles.rfidRight}>
+            <View style={styles.rfidIndex}>
+              <Text style={styles.rfidIndexText}>#{index + 1}</Text>
+            </View>
+            {isScanned && (
+              <View style={styles.scannedBadge}>
+                <Text style={styles.scannedBadgeText}>✓</Text>
+              </View>
             )}
           </View>
         </View>
-        
-        <View style={styles.rfidContent}>
-          <Text style={[
-            styles.rfidName,
-            isScanned && styles.rfidNameScanned
-          ]}>
-            {item.name}
-          </Text>
-          <Text style={styles.rfidTag}>
-            {item.rfid}
-          </Text>
-        </View>
-
-        {isScanned && (
-          <View style={styles.scannedBadge}>
-            <Text style={styles.scannedBadgeText}>Encontrado</Text>
-          </View>
-        )}
       </Animated.View>
     );
   };
 
   const renderFooter = () => (
     <View style={styles.actionsSection}>
-      <TouchableOpacity 
-        style={styles.interruptButton} 
-        onPress={handleInterruptScan}
-      >
-        <Feather name="square" size={18} color="#F44336" />
-        <Text style={styles.interruptButtonText}>Parar Verificação</Text>
-      </TouchableOpacity>
+      {!isFinishing && (
+        <>
+          <TouchableOpacity 
+            style={styles.interruptButton} 
+            onPress={handleInterruptScan}
+            disabled={!isScanning}
+          >
+            <Feather name="stop-circle" size={20} color="#F44336" />
+            <Text style={styles.interruptButtonText}>Parar Verificação</Text>
+          </TouchableOpacity>
+          
+          <View style={styles.helpCard}>
+            <Feather name="info" size={16} color="#2196F3" />
+            <Text style={styles.helpText}>
+              Aproxime as tags RFID do leitor para detectá-las automaticamente
+            </Text>
+          </View>
+        </>
+      )}
     </View>
   );
 
@@ -353,7 +604,7 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
     <View>
       {renderHeader()}
       {renderScanner()}
-      {renderSectionTitle()}
+      {!isFinishing && renderSectionTitle()}
     </View>
   );
 
@@ -361,7 +612,7 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.main}>
         <FlatList
-          data={rfidStatusList}
+          data={isFinishing ? [] : rfidStatusList}
           keyExtractor={item => item.rfid}
           renderItem={renderRfidItem}
           showsVerticalScrollIndicator={false}
@@ -369,15 +620,15 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
           ItemSeparatorComponent={() => <View style={styles.itemSeparator} />}
           ListHeaderComponent={ListHeaderComponent}
           ListFooterComponent={renderFooter}
-          ListEmptyComponent={() => (
+          ListEmptyComponent={() => !isFinishing ? (
             <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="close" size={64} color="#ccc" />
+              <MaterialCommunityIcons name="package-variant-closed" size={64} color="#ccc" />
               <Text style={styles.emptyTitle}>Nenhum item para verificar</Text>
               <Text style={styles.emptyText}>
                 Selecione ativos na tela anterior para iniciar a verificação.
               </Text>
             </View>
-          )}
+          ) : null}
         />
       </View>
     </SafeAreaView>
@@ -399,47 +650,87 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
 
-  // Header
+  // Header Section - TIMER REDUZIDO
   headerSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 16,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
   headerInfo: {
     flex: 1,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 4,
   },
   headerSubtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#666',
   },
-  timerContainer: {
+  headerRight: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'white',
     paddingHorizontal: 12,
     paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  statusBadgeFinishing: {
+    backgroundColor: '#E8F5E9',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#999',
+  },
+  statusDotConnected: {
+    backgroundColor: '#4CAF50',
+  },
+  statusDotFinishing: {
+    backgroundColor: '#4CAF50',
+  },
+  statusText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+  },
+  timerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 16,
     gap: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 2,
     elevation: 2,
   },
   timerText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#333',
-    fontFamily: 'monospace',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
 
   // Scanner Section
@@ -449,31 +740,56 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   scannerContainer: { 
-    marginBottom: 20,
+    marginBottom: 24,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scannerCircle: { 
-    width: 160, 
-    height: 160, 
-    borderRadius: 80, 
-    backgroundColor: '#ccc',
+    width: 180, 
+    height: 180, 
+    borderRadius: 90, 
+    backgroundColor: '#999',
     justifyContent: 'center', 
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowRadius: 12,
+    elevation: 10,
+    zIndex: 10,
   },
   scannerCircleConnected: {
     backgroundColor: '#4CAF50',
     shadowColor: '#4CAF50',
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.5,
+  },
+  radarWave: {
+    position: 'absolute',
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+    opacity: 0.3,
+  },
+  radarWave1: {
+    width: 220,
+    height: 220,
+  },
+  radarWave2: {
+    width: 260,
+    height: 260,
+    opacity: 0.2,
+  },
+  radarWave3: {
+    width: 300,
+    height: 300,
+    opacity: 0.1,
   },
   scannerStatusText: { 
     fontSize: 16, 
     fontWeight: 'bold', 
     color: 'white', 
-    marginTop: 8,
+    marginTop: 12,
   },
   scannerDeviceName: { 
     fontSize: 12, 
@@ -482,26 +798,76 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
+  // Finishing Section
+  finishingContainer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  finishingCircle: {
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: '#4CAF50',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 10,
+    marginBottom: 24,
+  },
+  finishingText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+    marginTop: 12,
+  },
+  finishingSubtext: {
+    fontSize: 14,
+    color: 'white',
+    opacity: 0.9,
+    marginTop: 4,
+  },
+  finishingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'white',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  finishingInfoText: {
+    fontSize: 13,
+    color: '#666',
+    flex: 1,
+  },
+
   // Progress Section
   progressSection: {
     width: '100%',
-    alignItems: 'center',
   },
-  progressInfo: {
+  progressHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    width: '100%',
-    marginBottom: 8,
+    alignItems: 'center',
+    marginBottom: 10,
   },
   progressText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#333',
   },
   progressPercentage: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: '#F4A64E',
   },
   progressBarContainer: {
     width: '100%',
@@ -509,15 +875,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#E0E0E0',
     borderRadius: 4,
     overflow: 'hidden',
+    marginBottom: 10,
   },
   progressBar: {
     height: '100%',
-    backgroundColor: '#4CAF50',
     borderRadius: 4,
   },
+  progressStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  progressStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  progressStatText: {
+    fontSize: 12,
+    color: '#666',
+  },
 
-  // Section Title
-  sectionTitleContainer: {
+  // Section Header
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 20,
     paddingBottom: 16,
   },
@@ -527,9 +909,9 @@ const styles = StyleSheet.create({
     color: '#333',
   },
 
-  // Item Separators
+  // Item Separator
   itemSeparator: {
-    height: 8,
+    height: 10,
   },
 
   // RFID Cards
@@ -540,7 +922,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 3,
     borderLeftWidth: 4,
@@ -553,13 +935,55 @@ const styles = StyleSheet.create({
   rfidCardRecent: {
     shadowColor: '#4CAF50',
     shadowOpacity: 0.3,
-    elevation: 6,
+    elevation: 8,
   },
-  rfidHeader: {
+  rfidCardContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+  },
+  rfidLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  rfidStatusIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rfidStatusIconScanned: {
+    backgroundColor: '#4CAF50',
+  },
+  rfidInfo: {
+    flex: 1,
+  },
+  rfidName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 6,
+  },
+  rfidNameScanned: {
+    color: '#2E7D32',
+  },
+  rfidTagContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  rfidTag: {
+    fontSize: 11,
+    color: '#999',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  rfidRight: {
+    alignItems: 'flex-end',
+    gap: 8,
   },
   rfidIndex: {
     backgroundColor: '#F0F0F0',
@@ -572,68 +996,60 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#666',
   },
-  rfidStatus: {
-    padding: 4,
-  },
-  rfidStatusScanned: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 12,
-  },
-  rfidContent: {
-    marginBottom: 8,
-  },
-  rfidName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-  },
-  rfidNameScanned: {
-    color: '#2E7D32',
-  },
-  rfidTag: {
-    fontSize: 12,
-    color: '#666',
-    fontFamily: 'monospace',
-    backgroundColor: '#F5F5F5',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    alignSelf: 'flex-start',
-  },
   scannedBadge: {
-    alignSelf: 'flex-end',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: '#4CAF50',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scannedBadgeText: {
-    fontSize: 10,
+    fontSize: 14,
     color: 'white',
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
 
-  // Actions
+  // Actions Section
   actionsSection: {
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 20,
+    gap: 12,
   },
   interruptButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
     borderRadius: 12,
-    backgroundColor: '#FFEBEE',
+    backgroundColor: 'white',
     borderWidth: 2,
     borderColor: '#F44336',
     gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   interruptButtonText: {
     color: '#F44336',
     fontSize: 16,
     fontWeight: '600',
+  },
+  helpCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    padding: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  helpText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#1976D2',
+    lineHeight: 18,
   },
 
   // Empty State
@@ -650,7 +1066,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   emptyText: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#666',
     textAlign: 'center',
     lineHeight: 22,
@@ -662,16 +1078,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,
-    margin: 20,
   },
-  errorIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  errorIconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     backgroundColor: '#FFEBEE',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   errorTitle: {
     fontSize: 24,
@@ -684,14 +1099,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 20,
+    lineHeight: 24,
+    marginBottom: 24,
   },
-  countdownContainer: {
+  countdownBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#FFF3E0',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    gap: 8,
   },
   countdownText: {
     fontSize: 14,

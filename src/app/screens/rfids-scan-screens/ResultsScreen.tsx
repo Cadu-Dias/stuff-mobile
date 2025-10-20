@@ -1,12 +1,16 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { RootStackNavigationProp } from '../../models/stackType';
 import { RfidStatusItem } from '../../models/rfids/rfidStatusItem';
-import Svg, { Circle, Text as SvgText } from 'react-native-svg';
+import { ReportService } from '../../services/reports.service';
+import { ReportCreation, ReportCsvModel } from '../../models/reports.model';
+import { SelectedAssets } from '../../models/asset.model';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import uuid from 'react-native-uuid';
 
-// Nova paleta de cores
+// Paleta de cores original mantida
 const colors = {
   // Primary brand colors
   stuffHigh: '#FFC685',
@@ -41,161 +45,6 @@ const colors = {
   newDark: '#0E5B56',
 };
 
-interface SelectedAssets {
-  organization: string;
-  assets: Array<{
-    asset_name: string;
-    rfid_tag: string;
-  }>;
-}
-
-const getProgressColor = (percentage: number): string => {
-  if (percentage >= 75) return colors.successLight;
-  if (percentage >= 35) return colors.warningBase;
-  return colors.dangerLight; 
-};
-
-const getStatusInfo = (percentage: number) => {
-  if (percentage >= 75) {
-    return { 
-      status: 'Excelente', 
-      color: colors.successLight,
-      icon: 'check-circle',
-      background: colors.successLight + '20'
-    };
-  }
-  if (percentage >= 35) {
-    return { 
-      status: 'Parcial', 
-      color: colors.warningBase,
-      icon: 'alert-circle',
-      background: colors.warningBase + '20'
-    };
-  }
-  return { 
-    status: 'Crítico', 
-    color: colors.dangerLight,
-    icon: 'x-circle',
-    background: colors.dangerLight + '20'
-  };
-};
-
-const ProgressCircle = ({ percentage, found, total, color }: { 
-  percentage: number, 
-  found: number, 
-  total: number, 
-  color: string
-}) => {
-  const radius = 80;
-  const strokeWidth = 12;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (circumference * percentage) / 100;
-
-  return (
-    <View style={styles.progressContainer}>
-      <Svg width={radius * 2 + 20} height={radius * 2 + 20}>
-        <Circle
-          stroke={colors.gray100}
-          fill="none"
-          cx={radius + 10}
-          cy={radius + 10}
-          r={radius - strokeWidth / 2}
-          strokeWidth={strokeWidth}
-        />
-        <Circle
-          stroke={color}
-          fill="none"
-          cx={radius + 10}
-          cy={radius + 10}
-          r={radius - strokeWidth / 2}
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          strokeLinecap="round"
-          transform={`rotate(-90 ${radius + 10} ${radius + 10})`}
-        />
-        <SvgText
-          x={radius - 30}
-          y={radius}
-          
-          alignmentBaseline="middle"
-          fontSize="36"
-          fontWeight="bold"
-          fill={color}
-        >
-          {Math.round(percentage)}%
-        </SvgText>
-        <SvgText
-          x={radius - 10}
-          y={radius + 35}
-          alignmentBaseline="middle"
-          fontSize="16"
-          fill={colors.gray400}
-          
-        >
-          {found} de {total}
-        </SvgText>
-      </Svg>
-    </View>
-  );
-};
-
-const StatCard = ({ icon, title, value, color, subtitle }: {
-  icon: string;
-  title: string;
-  value: string | number;
-  color: string;
-  subtitle?: string;
-}) => (
-  <View style={styles.statCard}>
-    <View style={[styles.statIcon, { backgroundColor: color + '20' }]}>
-      <MaterialCommunityIcons name={icon as any} size={24} color={color} />
-    </View>
-    <View style={styles.statContent}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statTitle}>{title}</Text>
-      {subtitle && <Text style={styles.statSubtitle}>{subtitle}</Text>}
-    </View>
-  </View>
-);
-
-const ResultItem = ({ item, index }: { item: RfidStatusItem; index: number }) => {
-  const isFound = item.scanned;
-  
-  return (
-    <View style={[
-      styles.resultItem, 
-      isFound ? styles.resultItemFound : styles.resultItemNotFound
-    ]}>
-      <View style={styles.resultHeader}>
-        <View style={[
-          styles.resultIcon,
-          { backgroundColor: isFound ? colors.successLight : colors.dangerLight }
-        ]}>
-          <Feather 
-            name={isFound ? "check" : "x"} 
-            size={16} 
-            color="white" 
-          />
-        </View>
-        <View style={styles.resultInfo}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemRfid}>RFID: {item.rfid}</Text>
-        </View>
-        <View style={styles.resultStatus}>
-          <Text style={[
-            styles.statusText, 
-            { color: isFound ? colors.successLight : colors.dangerLight }
-          ]}>
-            {isFound ? 'Encontrado' : 'Não Encontrado'}
-          </Text>
-          <Text style={styles.itemIndex}>#{index + 1}</Text>
-        </View>
-      </View>
-    </View>
-  );
-};
-
 const ResultsScreen = ({ route }: { 
   route: { 
     params: { 
@@ -207,26 +56,61 @@ const ResultsScreen = ({ route }: {
 }) => {
   const { results, deviceAddress, selectedAssets } = route.params;
   const navigation = useNavigation<RootStackNavigationProp>();
+  const reportService = new ReportService();
 
-  const { totalItems, totalfoundItems, totalnotFoundItems, percentage, progressColor, statusInfo } = useMemo(() => {
+  const { totalItems, totalFoundItems, totalNotFoundItems, successRate, allScanned } = useMemo(() => {
     const total = results.length;
     const found = results.filter(item => item.scanned).length;
     const notFound = total - found;
-    const perc = total > 0 ? (found / total) * 100 : 0;
+    const rate = total > 0 ? (found / total) * 100 : 0;
     
     return {
       totalItems: total,
-      totalfoundItems: found,
-      totalnotFoundItems: notFound,
-      percentage: perc,
-      progressColor: getProgressColor(perc),
-      statusInfo: getStatusInfo(perc),
+      totalFoundItems: found,
+      totalNotFoundItems: notFound,
+      successRate: rate,
+      allScanned: found === total,
     };
   }, [results]);
 
+  const uploadScanResult = async () => {
+    try {
+      const scanDate = new Date();
+      const userInfo = JSON.parse(await AsyncStorage.getItem("userData") as string) as { id: string };
+      const generatedUUID = uuid.v4();
+
+      const { key, url } = await reportService.generatePresignedUrl(
+        `${selectedAssets?.organizationName}-scan-${generatedUUID}.csv`
+      );
+
+      const reportPerAsset: ReportCsvModel[] = results.map((value) => {
+        const asset = selectedAssets?.assets!.find((selectAsset) => value.name === selectAsset.assetName);
+        return { 
+          assetId: asset!.assetId, 
+          assetName: value.name, 
+          found: value.scanned, 
+          creationDate: scanDate.toISOString(), 
+          updateDate: scanDate.toISOString()
+        };
+      });
+      
+      await reportService.uploadFileAsCSV(url, reportPerAsset);
+
+      const report: ReportCreation = {
+        authorId: userInfo.id,
+        organizationId: selectedAssets!.organizationId,
+        title: `${selectedAssets?.organizationName} RFID Scan ${generatedUUID}`,
+        key: key
+      };
+
+      await reportService.createReport(report);
+    } catch (error) {
+      console.log('Erro ao fazer upload:', error);
+    }
+  };
+
   const handleRestartScan = () => {
     if (deviceAddress && selectedAssets) {
-      // ✅ Passa selectedAssets de volta para StorageScan
       navigation.navigate('StorageScan', { 
         deviceAddress,
         selectedAssets 
@@ -234,125 +118,205 @@ const ResultsScreen = ({ route }: {
     }
   };
 
-  const handleExportResults = () => {
-    console.log('Exportar resultados');
+  const handleScanNotFound = () => {
+    if (deviceAddress && selectedAssets) {
+      const notFoundAssets = {
+        ...selectedAssets,
+        assets: selectedAssets.assets.filter(asset => {
+          const result = results.find(r => r.name === asset.assetName);
+          return result && !result.scanned;
+        })
+      };
+
+      navigation.navigate('StorageScan', { 
+        deviceAddress,
+        selectedAssets: notFoundAssets 
+      });
+    }
   };
+
+  // useEffect(() => {
+  //   uploadScanResult();
+  // }, []);
 
   const foundItems = results.filter(item => item.scanned);
   const notFoundItems = results.filter(item => !item.scanned);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.container}>
       <ScrollView style={styles.main} showsVerticalScrollIndicator={false}>
-        {/* Header Section */}
-        <View style={styles.headerSection}>
-          <View style={styles.headerIcon}>
-            <MaterialCommunityIcons name="radar" size={32} color={colors.stuffLight} />
+        {/* Header com ícone de status */}
+        <View style={styles.resultsHeader}>
+          <View style={[
+            styles.resultsIconContainer,
+            { backgroundColor: allScanned ? colors.successLight + '30' : colors.warningBase + '30' }
+          ]}>
+            <MaterialCommunityIcons 
+              name={allScanned ? "check-circle" : "alert-circle"} 
+              size={64} 
+              color={allScanned ? colors.successLight : colors.warningBase} 
+            />
           </View>
-          <Text style={styles.title}>Verificação Concluída</Text>
-          <Text style={styles.subtitle}>
-            {selectedAssets?.organization || 'Resultado da verificação RFID'}
+          
+          <Text style={styles.resultsTitle}>
+            {allScanned ? 'Scan Completo!' : 'Scan Parcial'}
           </Text>
-        </View>
+          
+          <Text style={styles.resultsSubtitle}>
+            {allScanned 
+              ? 'Todos os itens RFID foram encontrados'
+              : `${totalFoundItems} de ${totalItems} itens encontrados`
+            }
+          </Text>
 
-        {/* Progress Section */}
-        <View style={styles.progressSection}>
-          <ProgressCircle
-            percentage={percentage}
-            found={totalfoundItems}
-            total={totalItems}
-            color={progressColor}
-          />
-          <View style={[styles.statusBadge, { backgroundColor: statusInfo.background }]}>
-            <Feather name={statusInfo.icon as any} size={16} color={statusInfo.color} />
-            <Text style={[styles.statusBadgeText, { color: statusInfo.color }]}>
-              {statusInfo.status}
-            </Text>
+          {/* Porcentagem grande */}
+          <View style={styles.resultsPercentageContainer}>
+            <Text style={styles.resultsPercentage}>{Math.round(successRate)}%</Text>
+            <Text style={styles.resultsPercentageLabel}>Taxa de Sucesso</Text>
+          </View>
+
+          {/* Barra de progresso */}
+          <View style={styles.resultsProgressBar}>
+            <View style={[
+              styles.resultsProgressFill, 
+              { 
+                width: `${successRate}%`,
+                backgroundColor: allScanned ? colors.successLight : successRate >= 50 ? colors.warningBase : colors.dangerLight
+              }
+            ]} />
           </View>
         </View>
 
-        {/* Stats Section */}
-        <View style={styles.statsSection}>
-          <Text style={styles.sectionTitle}>Estatísticas</Text>
-          <View style={styles.statsGrid}>
-            <StatCard
-              icon="package-variant"
-              title="Total de Itens"
-              value={totalItems}
-              color={colors.newBase}
-            />
-            <StatCard
-              icon="check-circle"
-              title="Encontrados"
-              value={totalfoundItems}
-              color={colors.successLight}
-              subtitle={`${Math.round((totalfoundItems / totalItems) * 100)}%`}
-            />
-            <StatCard
-              icon="alert-circle"
-              title="Não Encontrados"
-              value={totalnotFoundItems}
-              color={colors.dangerLight}
-              subtitle={`${Math.round((totalnotFoundItems / totalItems) * 100)}%`}
-            />
+        {/* Cards de resumo */}
+        <View style={styles.resultsSummary}>
+          <View style={styles.resultsSummaryCard}>
+            <MaterialCommunityIcons name="radar" size={24} color={colors.newBase} />
+            <Text style={styles.resultsSummaryNumber}>{totalItems}</Text>
+            <Text style={styles.resultsSummaryLabel}>Total</Text>
+          </View>
+
+          <View style={styles.resultsSummaryCard}>
+            <Feather name="check-circle" size={24} color={colors.successLight} />
+            <Text style={styles.resultsSummaryNumber}>{totalFoundItems}</Text>
+            <Text style={styles.resultsSummaryLabel}>Encontrados</Text>
+          </View>
+
+          <View style={styles.resultsSummaryCard}>
+            <Feather name="alert-circle" size={24} color={colors.warningBase} />
+            <Text style={styles.resultsSummaryNumber}>{totalNotFoundItems}</Text>
+            <Text style={styles.resultsSummaryLabel}>Pendentes</Text>
           </View>
         </View>
 
-        {/* Results Section */}
-        <View style={styles.resultsSection}>
-          <View style={styles.resultsHeader}>
-            <Text style={styles.sectionTitle}>Resultados Detalhados</Text>
-            <TouchableOpacity style={styles.exportButton} onPress={handleExportResults}>
-              <Feather name="share" size={16} color={colors.stuffLight} />
+        {/* Detalhes dos itens */}
+        <View style={styles.resultsDetails}>
+          <Text style={styles.resultsDetailsTitle}>Detalhes</Text>
+          
+          <ScrollView style={styles.resultsDetailsList} showsVerticalScrollIndicator={false}>
+            {/* Itens encontrados */}
+            {foundItems.length > 0 && (
+              <View style={styles.categorySection}>
+                <View style={styles.categoryHeader}>
+                  <Feather name="check-circle" size={16} color={colors.successLight} />
+                  <Text style={[styles.categoryTitle, { color: colors.successBase }]}>
+                    Encontrados ({foundItems.length})
+                  </Text>
+                </View>
+                {foundItems.map((item, index) => (
+                  <View key={item.rfid} style={styles.resultsDetailItem}>
+                    <View style={[styles.resultsDetailIcon, styles.resultsDetailIconSuccess]}>
+                      <Feather name="check" size={16} color="white" />
+                    </View>
+                    <View style={styles.resultsDetailInfo}>
+                      <Text style={styles.resultsDetailName}>{item.name}</Text>
+                      <Text style={styles.resultsDetailStatus}>
+                        RFID: {item.rfid}
+                      </Text>
+                    </View>
+                    <View style={styles.resultsDetailBadge}>
+                      <Text style={styles.resultsDetailNumber}>#{index + 1}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Itens não encontrados */}
+            {notFoundItems.length > 0 && (
+              <View style={styles.categorySection}>
+                <View style={styles.categoryHeader}>
+                  <Feather name="alert-circle" size={16} color={colors.warningBase} />
+                  <Text style={[styles.categoryTitle, { color: colors.warningDark }]}>
+                    Não Encontrados ({notFoundItems.length})
+                  </Text>
+                </View>
+                {notFoundItems.map((item, index) => (
+                  <View key={item.rfid} style={styles.resultsDetailItem}>
+                    <View style={[styles.resultsDetailIcon, styles.resultsDetailIconPending]}>
+                      <Feather name="minus" size={16} color="white" />
+                    </View>
+                    <View style={styles.resultsDetailInfo}>
+                      <Text style={styles.resultsDetailName}>{item.name}</Text>
+                      <Text style={styles.resultsDetailStatus}>
+                        RFID: {item.rfid}
+                      </Text>
+                    </View>
+                    <View style={styles.resultsDetailBadge}>
+                      <Text style={styles.resultsDetailNumber}>#{foundItems.length + index + 1}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+        </View>
+
+        {/* Informações adicionais */}
+        {selectedAssets && (
+          <View style={styles.infoSection}>
+            <View style={styles.infoItem}>
+              <MaterialCommunityIcons name="office-building" size={16} color={colors.gray400} />
+              <Text style={styles.infoLabel}>Organização:</Text>
+              <Text style={styles.infoValue}>{selectedAssets.organizationName}</Text>
+            </View>
+            {deviceAddress && (
+              <View style={styles.infoItem}>
+                <MaterialCommunityIcons name="bluetooth" size={16} color={colors.gray400} />
+                <Text style={styles.infoLabel}>Dispositivo:</Text>
+                <Text style={styles.infoValue}>{deviceAddress}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Botões de ação */}
+        <View style={styles.stepActions}>
+          {!allScanned && totalNotFoundItems > 0 && (
+            <TouchableOpacity
+              style={styles.scanAgainButton}
+              onPress={handleScanNotFound}
+            >
+              <MaterialCommunityIcons name="radar" size={20} color={colors.stuffLight} />
+              <Text style={styles.scanAgainButtonText}>Escanear Pendentes</Text>
             </TouchableOpacity>
-          </View>
-
-          {foundItems.length > 0 && (
-            <View style={styles.categorySection}>
-              <Text style={[styles.categoryTitle, { color: colors.successBase }]}>
-                Encontrados ({foundItems.length})
-              </Text>
-              {foundItems.map((item, index) => (
-                <ResultItem key={item.rfid} item={item} index={index} />
-              ))}
-            </View>
           )}
-
-          {notFoundItems.length > 0 && (
-            <View style={styles.categorySection}>
-              <Text style={[styles.categoryTitle, { color: colors.dangerBase }]}>
-                Não Encontrados ({notFoundItems.length})
-              </Text>
-              {notFoundItems.map((item, index) => (
-                <ResultItem key={item.rfid} item={item} index={foundItems.length + index} />
-              ))}
-            </View>
-          )}
-        </View>
-
-        {/* Actions Section */}
-        <View style={styles.actionsSection}>
-          <TouchableOpacity 
-            style={styles.secondaryButton} 
-            onPress={handleExportResults}
-          >
-            <Feather name="download" size={18} color={colors.gray400} />
-            <Text style={styles.secondaryButtonText}>Exportar</Text>
-          </TouchableOpacity>
 
           {deviceAddress && selectedAssets && (
-            <TouchableOpacity style={styles.restartButton} onPress={handleRestartScan}>
-              <Feather name="refresh-cw" size={18} color={colors.stuffLight} />
-              <Text style={styles.restartButtonText}>Refazer</Text>
+            <TouchableOpacity
+              style={styles.restartButton}
+              onPress={handleRestartScan}
+            >
+              <Feather name="refresh-cw" size={20} color={colors.gray400} />
+              <Text style={styles.restartButtonText}>Refazer Completo</Text>
             </TouchableOpacity>
           )}
-
-          <TouchableOpacity 
-            style={styles.finishButton} 
+          
+          <TouchableOpacity
+            style={styles.finishButton}
             onPress={() => navigation.navigate('MainTabs')}
           >
+            <Text style={styles.finishButtonText}>Concluir</Text>
             <Feather name="check" size={20} color="white" />
-            <Text style={styles.finishButtonText}>Finalizar</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -361,281 +325,287 @@ const ResultsScreen = ({ route }: {
 };
 
 const styles = StyleSheet.create({
-  safeArea: { 
-    flex: 1, 
-    backgroundColor: colors.stuffLight 
+  container: {
+    flex: 1,
+    backgroundColor: colors.stuffLight, // Mantido background laranja
   },
-  main: { 
-    flex: 1, 
-    backgroundColor: colors.stuffWhite, 
-    margin: 12, 
+  main: {
+    flex: 1,
+    backgroundColor: colors.stuffWhite, // Mantido background bege claro
+    margin: 12,
     borderRadius: 8,
   },
 
-  // Header Section
-  headerSection: {
+  // Header com ícone de status
+  resultsHeader: {
     alignItems: 'center',
-    paddingTop: 30,
+    paddingTop: 40,
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 30,
   },
-  headerIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'white',
+  resultsIconContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
     shadowColor: colors.stuffBlack,
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: 8,
     elevation: 4,
   },
-  title: { 
-    fontSize: 24, 
-    fontWeight: 'bold', 
+  resultsTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
     color: colors.stuffBlack,
-    marginBottom: 4,
+    marginBottom: 8,
   },
-  subtitle: { 
-    fontSize: 16, 
-    color: colors.gray400, 
+  resultsSubtitle: {
+    fontSize: 15,
+    color: colors.gray400,
     textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
   },
 
-  // Progress Section
-  progressSection: {
+  // Porcentagem
+  resultsPercentageContainer: {
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  progressContainer: { 
-    marginBottom: 16,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
-  },
-  statusBadgeText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  // Stats Section
-  statsSection: {
-    paddingHorizontal: 20,
     marginBottom: 20,
   },
-  sectionTitle: {
+  resultsPercentage: {
+    fontSize: 56,
+    fontWeight: 'bold',
+    color: colors.stuffLight,
+    letterSpacing: -2,
+  },
+  resultsPercentageLabel: {
+    fontSize: 14,
+    color: colors.gray400,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+
+  // Barra de progresso
+  resultsProgressBar: {
+    width: '100%',
+    height: 12,
+    backgroundColor: colors.gray100,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  resultsProgressFill: {
+    height: '100%',
+    borderRadius: 6,
+  },
+
+  // Cards de resumo
+  resultsSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+  },
+  resultsSummaryCard: {
+    backgroundColor: 'white',
+    padding: 20,
+    borderRadius: 16,
+    alignItems: 'center',
+    flex: 1,
+    marginHorizontal: 6,
+    shadowColor: colors.stuffBlack,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  resultsSummaryNumber: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: colors.stuffBlack,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  resultsSummaryLabel: {
+    fontSize: 12,
+    color: colors.gray400,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+
+  // Detalhes
+  resultsDetails: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 20,
+  },
+  resultsDetailsTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: colors.stuffBlack,
     marginBottom: 16,
   },
-  statsGrid: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    shadowColor: colors.stuffBlack,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  statIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  statContent: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.stuffBlack,
-    marginBottom: 4,
-  },
-  statTitle: {
-    fontSize: 12,
-    color: colors.gray400,
-    textAlign: 'center',
-    marginBottom: 2,
-  },
-  statSubtitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.stuffBlack,
+  resultsDetailsList: {
+    maxHeight: 400,
   },
 
-  // Results Section
-  resultsSection: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
-  },
-  resultsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  exportButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'white',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: colors.stuffBlack,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
+  // Categorias
   categorySection: {
     marginBottom: 20,
   },
-  categoryTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  categoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  categoryTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
   },
 
-  // Result Items
-  resultItem: {
+  // Item de detalhe
+  resultsDetailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: 'white',
+    padding: 14,
     borderRadius: 12,
-    padding: 16,
     marginBottom: 8,
     shadowColor: colors.stuffBlack,
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.06,
     shadowRadius: 2,
     elevation: 2,
   },
-  resultItemFound: {
-    borderLeftWidth: 4,
-    borderLeftColor: colors.successLight,
-  },
-  resultItemNotFound: {
-    borderLeftWidth: 4,
-    borderLeftColor: colors.dangerLight,
-  },
-  resultHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  resultIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  resultsDetailIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
-  resultInfo: {
+  resultsDetailIconSuccess: {
+    backgroundColor: colors.successLight,
+  },
+  resultsDetailIconPending: {
+    backgroundColor: colors.warningBase,
+  },
+  resultsDetailInfo: {
     flex: 1,
   },
-  itemName: {
-    fontSize: 16,
+  resultsDetailName: {
+    fontSize: 15,
     fontWeight: '600',
     color: colors.stuffBlack,
     marginBottom: 4,
   },
-  itemRfid: {
+  resultsDetailStatus: {
     fontSize: 12,
-    color: colors.gray300,
+    color: colors.gray400,
     fontFamily: 'monospace',
   },
-  resultStatus: {
-    alignItems: 'flex-end',
+  resultsDetailBadge: {
+    backgroundColor: colors.gray100,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  statusText: {
-    fontSize: 14,
+  resultsDetailNumber: {
+    fontSize: 11,
+    color: colors.gray400,
     fontWeight: '600',
-    marginBottom: 2,
-  },
-  itemIndex: {
-    fontSize: 10,
-    color: colors.gray200,
   },
 
-  // Actions Section
-  actionsSection: {
-    flexDirection: 'column',
+  // Informações adicionais
+  infoSection: {
     paddingHorizontal: 20,
-    paddingBottom: 20,
-    gap: 12,
+    paddingVertical: 16,
   },
-  secondaryButton: {
-    flex: 1,
+  infoItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 8,
+    gap: 8,
+  },
+  infoLabel: {
+    fontSize: 14,
+    color: colors.gray400,
+    fontWeight: '500',
+  },
+  infoValue: {
+    fontSize: 14,
+    color: colors.stuffBlack,
+    flex: 1,
+  },
+
+  // Botões de ação
+  stepActions: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 30,
+    gap: 12,
+  },
+  scanAgainButton: {
+    flexDirection: 'row',
     justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
     backgroundColor: 'white',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.stuffLight,
+    gap: 8,
+    shadowColor: colors.stuffBlack,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  scanAgainButtonText: {
+    color: colors.stuffLight,
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  restartButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: 'white',
     borderWidth: 1,
     borderColor: colors.gray100,
-    gap: 6,
+    gap: 8,
   },
-  secondaryButtonText: {
+  restartButtonText: {
     color: colors.gray400,
     fontSize: 16,
     fontWeight: '600',
   },
-  restartButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: colors.stuffLight,
-    gap: 8,
-  },
-  restartButtonText: {
-    color: colors.stuffLight,
-    fontSize: 16,
-    fontWeight: '600',
-  },
   finishButton: {
-    flex: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: colors.stuffLight,
-    paddingVertical: 12,
-    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
     gap: 8,
     shadowColor: colors.stuffBlack,
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
-    shadowRadius: 4,
+    shadowRadius: 8,
     elevation: 4,
   },
   finishButtonText: {
     color: 'white',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
 });
 

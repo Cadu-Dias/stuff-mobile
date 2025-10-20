@@ -157,7 +157,7 @@ const RFIDScanManagerScreen = () => {
             <View style={styles.orgIcon}>
               <MaterialCommunityIcons name="office-building" size={20} color="#2196F3" />
             </View>
-            <Text style={styles.orgName}>{selectedAssets.organization}</Text>
+            <Text style={styles.orgName}>{selectedAssets.organizationName}</Text>
             <Text style={styles.assetsCount}>
               {selectedAssets.assets.length} {selectedAssets.assets.length === 1 ? 'ativo' : 'ativos'}
             </Text>
@@ -169,8 +169,8 @@ const RFIDScanManagerScreen = () => {
                 <View style={styles.assetIcon}>
                   <MaterialCommunityIcons name="package" size={16} color="#4CAF50" />
                 </View>
-                <Text style={styles.assetName}>{asset.asset_name}</Text>
-                <Text style={styles.rfidTag}>{asset.rfid_tag}</Text>
+                <Text style={styles.assetName}>{asset.assetName}</Text>
+                <Text style={styles.rfidTag}>{asset.rfidTag}</Text>
               </View>
             ))}
             {selectedAssets.assets.length > 3 && (
