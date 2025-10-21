@@ -466,7 +466,7 @@ export default function OrganizationDetailScreen() {
     return (
       <View style={styles.assetsTabContainer}>
         <FlatList
-          data={assets}
+          data={assets.filter((assets) => !assets.trashBin)}
           renderItem={({ item }) => <AssetItem item={item} onPress={handleAssetPress} />}
           keyExtractor={item => item.id}
           style={styles.tabContent}

@@ -650,7 +650,9 @@ const QRCodeReaderScreen = () => {
       ]);
 
       setOrganization(orgData);
-      setAssets(assetsData.map(asset => ({ ...asset, selected: false, scanned: false })));
+
+      const activeAssets = assetsData.filter((asset) => !asset.trashBin);
+      setAssets(activeAssets.map(asset => ({ ...asset, selected: false, scanned: false })));
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       Alert.alert('Erro', 'Não foi possível carregar os dados');

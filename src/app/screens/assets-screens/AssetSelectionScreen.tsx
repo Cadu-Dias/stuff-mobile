@@ -122,10 +122,12 @@ const AssetSelectionScreen = () => {
         setSaving(true);
         try {
             const dataToSave = {
-                organization: organization!.name,
+                organizationId: organization?.id,
+                organizationName: organization?.name,
                 assets: selectedAssets.map(asset => ({
-                    asset_name: asset.name,
-                    rfid_tag: asset.rfidTag
+                    assetId: asset.id,
+                    assetName: asset.name,
+                    rfidTag: asset.rfidTag
                 }))
             };
 
