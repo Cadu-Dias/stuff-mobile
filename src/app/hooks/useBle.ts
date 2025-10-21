@@ -17,7 +17,7 @@ interface BluetoothLowEnergyApi {
   scanForPeripherals(): void;
   cancelDiscovery(): void;
   connectToDevice: (deviceAddress: string) => Promise<void>;
-  disconnectFromDevice: () => void;
+  disconnectFromDevice: () => Promise<void>;
   connectedDevice: BluetoothDevice | null;
   allDevices: BluetoothDevice[];
   scannedRfids: string[];
@@ -36,6 +36,7 @@ function useBLE(): BluetoothLowEnergyApi {
       if (discoveryTimeoutRef.current) {
         clearTimeout(discoveryTimeoutRef.current);
       }
+      disconnectFromDevice();
     };
   }, []);
 
@@ -52,7 +53,6 @@ function useBLE(): BluetoothLowEnergyApi {
 
   const checkLocationEnabled = useCallback(async (): Promise<boolean> => {
     return new Promise((resolve) => {
-
       Geolocation.getCurrentPosition(
         () => {
           console.log("Localização habilitada");
@@ -71,7 +71,6 @@ function useBLE(): BluetoothLowEnergyApi {
     });
   }, []);
 
-  // Requisitar permissões
   const requestPermissions = useCallback(async (cb: VoidCallback) => {
     if (Platform.OS !== "android") {
       cb(true);
@@ -261,15 +260,18 @@ function useBLE(): BluetoothLowEnergyApi {
     let convertedData = readEvent.data?.split(",")[0].trim();
 
     if (convertedData) {
-      const isInvalidValue =
-        scannedRfids.includes(convertedData) ||
-        convertedData.includes("000000");
+      const isInvalidValue = convertedData.includes("000000");
 
       if (!isInvalidValue) {
-        setScannedRfids((prevState) => [...prevState, convertedData]);
+        setScannedRfids((prevState) => {
+          if (prevState.includes(convertedData)) {
+            return prevState;
+          }
+          return [...prevState, convertedData];
+        });
       }
     }
-  }, [scannedRfids]);
+  }, []);
 
   const startStreamingData = useCallback(async (device: BluetoothDevice) => {
     if (device) {
@@ -285,8 +287,10 @@ function useBLE(): BluetoothLowEnergyApi {
         await RNBluetoothClassic.cancelDiscovery();
         setIsDiscovering(false);
       }
+      
       const deviceConnection = await RNBluetoothClassic.connectToDevice(deviceAddress);
       setConnectedDevice(deviceConnection);
+      setScannedRfids([]);
       await startStreamingData(deviceConnection);
     } catch (e) {
       console.log("FALHA AO CONECTAR", e);
@@ -297,14 +301,30 @@ function useBLE(): BluetoothLowEnergyApi {
   const disconnectFromDevice = useCallback(async () => {
     if (connectedDevice) {
       try {
-        console.log('Dispositivo Desconectado');
-        await RNBluetoothClassic.disconnectFromDevice(connectedDevice.address);
+        console.log('🔌 Iniciando desconexão do dispositivo:', connectedDevice.name);
+        const isConnected = await connectedDevice.isConnected();
+        
+        if (isConnected) {
+          const disconnected = await connectedDevice.disconnect();
+          
+          if (disconnected) {
+            console.log('✅ Dispositivo desconectado com sucesso');
+          } else {
+            console.log('⚠️ Desconexão retornou false');
+          }
+        } else {
+          console.log('ℹ️ Dispositivo já estava desconectado');
+        }
+        
       } catch (error) {
-        console.log("Dispositivo já foi desconectado");
+        console.error("❌ Erro ao desconectar:", error);
       } finally {
         setConnectedDevice(null);
         setScannedRfids([]);
+        console.log('🧹 Estado limpo (dispositivo removido)');
       }
+    } else {
+      console.log('ℹ️ Nenhum dispositivo conectado para desconectar');
     }
   }, [connectedDevice]);
 
