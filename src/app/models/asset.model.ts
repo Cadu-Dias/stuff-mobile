@@ -39,9 +39,11 @@ export interface AttributeValue {
 }
 
 export interface SelectedAssets {
-  organization: string;
+  organizationId: string;
+  organizationName: string;
   assets: Array<{
-    asset_name: string;
-    rfid_tag: string;
+    assetId: string;
+    assetName: string;
+    rfidTag: string;
   }>;
 }
