@@ -17,6 +17,7 @@
     "@react-navigation/native": "^7.1.17",
     "@react-navigation/native-stack": "^7.3.25",
     "@react-navigation/stack": "^7.4.8",
+    "buffer": "^6.0.3",
     "expo": "53.0.22",
     "expo-camera": "~16.1.11",
     "expo-print": "~14.1.4",
@@ -31,7 +32,8 @@
     "react-native-qr-svg": "^1.5.0",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
-    "react-native-svg": "^15.14.0"
+    "react-native-svg": "^15.14.0",
+    "react-native-uuid": "^2.0.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
