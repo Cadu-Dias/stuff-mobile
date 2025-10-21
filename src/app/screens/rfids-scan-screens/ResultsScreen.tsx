@@ -88,6 +88,7 @@ const ResultsScreen = ({ route }: {
         return { 
           assetId: asset!.assetId, 
           assetName: value.name, 
+          scanDate: value.scanDate,
           found: value.scanned, 
           creationDate: scanDate.toISOString(), 
           updateDate: scanDate.toISOString()
@@ -135,9 +136,9 @@ const ResultsScreen = ({ route }: {
     }
   };
 
-  // useEffect(() => {
-  //   uploadScanResult();
-  // }, []);
+  useEffect(() => {
+    uploadScanResult();
+  }, []);
 
   const foundItems = results.filter(item => item.scanned);
   const notFoundItems = results.filter(item => !item.scanned);
