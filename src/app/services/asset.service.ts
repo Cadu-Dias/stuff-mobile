@@ -34,11 +34,16 @@ export class AssetService {
     public async getOrganizationAssets(organizationId: string) {
         const accessToken = await AsyncStorage.getItem("accessToken");
         if (!accessToken) throw new Error("Usuário não autenticado!");
-
+        
         const response = await fetch(`${this.apiUrl}/organizations/${organizationId}/assets`, {
             method: "GET",
             headers: { "Authorization": `Bearer ${accessToken}` }
         })
+
+        if(!response.ok) {
+            console.log(response);
+            throw new Error("Não foi possível obter dados dos ativos da organização!");
+        }
 
         const responseJson = await response.json() as { data: Asset[]; message: string };
         return responseJson.data;
