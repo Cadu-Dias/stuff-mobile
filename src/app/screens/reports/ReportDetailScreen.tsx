@@ -251,15 +251,64 @@ export default function ReportDetailScreen() {
     }
   };
 
+  const formatReportDateTitle = (title: string): string => {
+    try {
+      if (!title || !title.trim()) return '';
+
+      const scanType = title.includes("RFID Scan") 
+        ? "RFID Scan" 
+          : title.includes("QR Code Scan")
+        ? "QR Code Scan"
+          : null;
+
+      if (!scanType) {
+        console.warn('Tipo de scan não encontrado no título:', title);
+        return title;
+      }
+
+      const parts = title.split(scanType);
+      const textTitle = parts[0]?.trim() || '';
+      const dateStr = parts[1]?.trim() || '';
+
+      console.log('Text Title:', textTitle);
+      console.log('Date String:', dateStr);
+      
+      const formattedDate = formatDate(dateStr);
+      return `${textTitle} ${scanType} ${formattedDate}`.trim();
+      
+    } catch (error) {
+      console.error('Erro ao formatar título do relatório:', error);
+      return title;
+    }
+  }
+
+
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
+    try {
+
+      if (!dateString || !dateString.trim()) return '';
+      if (!dateString.includes("T")) return dateString;
+
+      const date = new Date(dateString);
+      
+      if (isNaN(date.getTime())) {
+        console.warn('Data inválida:', dateString);
+        return dateString;
+      }
+
+      return date.toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Erro ao formatar data:', error);
+      return dateString;
+    }
+  }
 
   const toggleViewMode = () => {
     setViewMode(viewMode === 'cards' ? 'table' : 'cards');
@@ -299,14 +348,13 @@ export default function ReportDetailScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.main}>
-        {/* Header do Relatório */}
         <View style={styles.reportHeader}>
           <View style={styles.reportHeaderTop}>
             <View style={styles.reportIconLarge}>
               <Feather name="file-text" size={32} color="#F4A64E" />
             </View>
             <View style={styles.reportHeaderInfo}>
-              <Text style={styles.reportTitle}>{report.title}</Text>
+              <Text style={styles.reportTitle}>{formatReportDateTitle(report.title)}</Text>
               <View style={styles.reportMeta}>
                 <Feather name="calendar" size={14} color="#888" />
                 <Text style={styles.reportMetaText}>{formatDate(report.createdAt)}</Text>
@@ -349,7 +397,6 @@ export default function ReportDetailScreen() {
           </View>
         </View>
 
-        {/* Dados */}
         <View style={styles.dataContainer}>
           <View style={styles.dataHeader}>
             <Text style={styles.dataTitle}>
