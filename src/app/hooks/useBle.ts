@@ -14,6 +14,7 @@ interface BluetoothLowEnergyApi {
   requestPermissions(cb: VoidCallback): Promise<void>;
   checkBluetoothEnabled(): Promise<boolean>;
   checkLocationEnabled(): Promise<boolean>;
+  testConnection(deviceAddress: string): Promise<boolean>;
   scanForPeripherals(): void;
   cancelDiscovery(): void;
   connectToDevice: (deviceAddress: string) => Promise<void>;
@@ -251,26 +252,63 @@ function useBLE(): BluetoothLowEnergyApi {
     await RNBluetoothClassic.cancelDiscovery();
   }, []);
 
+  const testConnection = useCallback(async (deviceAddress: string) => {
+
+    let isDeviceConnected = false;
+    try {
+      console.log("Testando conexão com dispositivo...")
+      const connectDevice = await RNBluetoothClassic.connectToDevice(deviceAddress);
+      setConnectedDevice(connectDevice);
+
+      isDeviceConnected = await RNBluetoothClassic.isDeviceConnected(deviceAddress);
+      
+      console.log(`Conexão com dispositivo: ${isDeviceConnected}`);
+    } catch (error) {
+      console.log(error);
+    } finally {
+      console.log("Disconectando do dispositivo");
+      await disconnectFromDevice();
+    }
+
+    return isDeviceConnected;
+    
+  }, []);
+
   const onRfidScanned = useCallback((readEvent: BluetoothDeviceReadEvent) => {
     if (readEvent.eventType === "ERROR") {
       console.error("Erro ao ler dados do dispositivo:", readEvent.data);
       return;
     }
 
-    let convertedData = readEvent.data?.split(",")[0].trim();
-
-    if (convertedData) {
-      const isInvalidValue = convertedData.includes("000000");
-
-      if (!isInvalidValue) {
-        setScannedRfids((prevState) => {
-          if (prevState.includes(convertedData)) {
-            return prevState;
-          }
-          return [...prevState, convertedData];
-        });
-      }
+    if (!readEvent.data) {
+      console.warn("Dados vazios recebidos");
+      return;
     }
+
+    const convertedData = readEvent.data.split(",")[0]?.trim();
+    if (!convertedData) {
+      console.warn("RFID vazio após conversão");
+      return;
+    }
+
+    if (convertedData.includes("000000")) {
+      console.log("RFID inválido (contém 000000):", convertedData);
+      return;
+    }
+
+    setScannedRfids((prevState) => {
+      const uniqueRfids = new Set([...prevState, convertedData]);
+      const newArray = Array.from(uniqueRfids);
+      
+      if (newArray.length > prevState.length) {
+        console.log("✅ Novo RFID adicionado:", convertedData);
+        console.log("Total de RFIDs:", newArray.length);
+      } else {
+        console.log("⚠️ RFID duplicado ignorado:", convertedData);
+      }
+      
+      return newArray;
+    });
   }, []);
 
   const startStreamingData = useCallback(async (device: BluetoothDevice) => {
@@ -317,7 +355,7 @@ function useBLE(): BluetoothLowEnergyApi {
         }
         
       } catch (error) {
-        console.error("❌ Erro ao desconectar:", error);
+        console.log("❌ Erro ao desconectar:", error);
       } finally {
         setConnectedDevice(null);
         setScannedRfids([]);
@@ -329,6 +367,7 @@ function useBLE(): BluetoothLowEnergyApi {
   }, [connectedDevice]);
 
   return {
+    testConnection,
     scanForPeripherals,
     cancelDiscovery,
     requestPermissions,
