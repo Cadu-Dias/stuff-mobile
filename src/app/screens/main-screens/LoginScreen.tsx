@@ -43,7 +43,7 @@ const LoginScreen = () => {
 
     const handleLogin = async () => {
         setIsLogging(true);
-        setLoginError(''); // Limpa erros anteriores
+        setLoginError('');
 
         try {
             await authService.loginUser({ email, password });
@@ -53,6 +53,7 @@ const LoginScreen = () => {
             await AsyncStorage.setItem(
                 "userData", 
                 JSON.stringify({ 
+                    id: userInfo.id,
                     firstName: userInfo.firstName, 
                     lastName: userInfo.lastName, 
                     username: userInfo.userName 
@@ -62,25 +63,15 @@ const LoginScreen = () => {
             setIsLogging(false);
             navigator.navigate('OrganizationsScreen'); 
         } catch (error: any) {
-            console.error('Erro no login:', error);
-            setIsLogging(false);
             
-            // Identificar tipo de erro e mostrar mensagem apropriada
-            if (error?.response?.status === 401) {
-                setLoginError('E-mail ou senha incorretos. Tente novamente.');
-            } else if (error?.response?.status === 404) {
-                setLoginError('Usuário não encontrado. Verifique seu e-mail.');
-            } else if (error?.message?.includes('Network')) {
-                setLoginError('Erro de conexão. Verifique sua internet.');
-            } else {
-                setLoginError('Erro ao fazer login. Tente novamente mais tarde.');
-            }
+            setLoginError(error["message"]);
+            setIsLogging(false);
         }
     };
 
     const handleEmailChange = (text: string) => {
         setEmail(text);
-        setLoginError(''); // Limpa erro de login ao digitar
+        setLoginError('');
         
         if (text && !validateEmail(text)) {
             setEmailError('Por favor, insira um e-mail válido.');
@@ -91,7 +82,7 @@ const LoginScreen = () => {
 
     const handlePasswordChange = (text: string) => {
         setPassword(text);
-        setLoginError(''); // Limpa erro de login ao digitar
+        setLoginError('');
     };
 
     const isButtonDisabled = !email || !password || !!emailError || isLogging;
