@@ -11,13 +11,14 @@ import QRCodeReaderScreen from "./qrcode-scan-screens/QRCodeScanScreen";
 import AssetDetailScreen from "./assets-screens/AssetDetailScreen";
 import RFIDScanManagerScreen from "./rfids-scan-screens/RfidScanManagerScreen";
 import AssetSelectionScreen from "./assets-screens/AssetSelectionScreen";
+import ReportDetailScreen from "./reports/ReportDetailScreen";
 
 const SCREENS = { 
     HomeScreen, StorageScanScreen, DeviceDiscovery, 
     LoginScreen, ResultsScreen, ProfileScreen, OrganizationsScreen,
     OrganizationDetailScreen, ScanScreen, QRCodeReaderScreen, 
     AssetDetailScreen, RFIDScanManagerScreen, 
-    AssetSelectionScreen
+    AssetSelectionScreen, ReportDetailScreen
 }
 
 export default SCREENS

@@ -1,13 +1,14 @@
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { RfidStatusItem } from "./rfids/rfidStatusItem";
 import { SelectedAssets } from "./asset.model";
+import { Report } from "./reports.model";
 
-type RootStackParamList = {
+export type RootStackParamList = {
     Login: undefined;
     MainTabs: undefined;
     OrganizationsScreen: undefined;
     AssetDetails: { organizationId: string, assetId: string };
-    AttributeDetails: { attributeId: string, assetId: string };
+    ReportDetail: { report: Report };
     QrCodeScan: undefined;
     RFIDScanManager: undefined;
     AssetSelection: undefined;

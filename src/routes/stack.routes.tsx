@@ -1,28 +1,14 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
-import { SelectedAssets } from '../app/models/asset.model';
-import { RfidStatusItem } from '../app/models/rfids/rfidStatusItem';
+import { RootStackParamList } from '../app/models/stackType';
 import SCREENS from '../app/screens/screens';
 import TabRoutes from './tab.routes';
 import HeaderTitle from '../app/components/Header';
-
-type RootStackParamList = {
-    Login: undefined;
-    MainTabs: undefined;
-    OrganizationsScreen: undefined;
-    AssetDetails: { organizationId: string, assetId: string };
-    QrCodeScan: undefined;
-    RFIDScanManager: undefined;
-    AssetSelection: undefined;
-    DeviceDiscovery: undefined; 
-    StorageScan: { deviceAddress: string, selectedAssets: SelectedAssets };
-    ResultsScreen: { results: RfidStatusItem[], deviceAddress: string, selectedAssets: SelectedAssets };
-};
 
 const RootStack = createNativeStackNavigator<RootStackParamList>({
   initialRouteName: 'Login', 
   screenOptions: {
     headerStyle: {
-      backgroundColor: '#FFF0E0', // Cor de fundo principal do app
+      backgroundColor: '#FFF0E0',
     },
     headerShadowVisible: false,
     headerTitle: () => <HeaderTitle />,
@@ -58,6 +44,10 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
       screen: SCREENS.AssetSelectionScreen,
       options: {}
     },
+    ReportDetail: {
+      screen: SCREENS.ReportDetailScreen,
+      options: {}
+    },
     QrCodeScan: {
       screen: SCREENS.QRCodeReaderScreen,
       options: {}
@@ -67,8 +57,6 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
       options: { 
         title: 'Conectar Dispositivo',
         headerBackTitle: undefined
-        // Você pode customizar a apresentação para ser um modal, por exemplo
-        // presentation: 'modal', 
       },
     },
     StorageScan: {
