@@ -14,16 +14,19 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-// import QRCode from 'react-native-qrcode-svg';
 import { AssetService } from '../../services/asset.service';
 import { OrganizationService } from '../../services/organization.service';
 import { Asset } from '../../models/asset.model';
 import { Organization } from '../../models/organization.model';
+import { ReportService } from '../../services/reports.service';
+import { ReportCreation, ReportCsvModel } from '../../models/reports.model';
+import uuid from 'react-native-uuid';
 
 type Step = 'asset-selection' | 'print-selection' | 'scanning' | 'results';
 
 interface AssetWithSelection extends Asset {
   selected: boolean;
+  scanDate?: string;
   scanned?: boolean;
 }
 
@@ -499,15 +502,59 @@ const ScannerCamera = ({ organization, asset, onScanned }: ScannerCameraProps) =
 
 interface ResultsStepProps {
   selectedAssets: AssetWithSelection[];
+  organization: Organization;
   onFinish: () => void;
   onScanAgain: () => void;
 }
 
-const ResultsStep = ({ selectedAssets, onFinish, onScanAgain }: ResultsStepProps) => {
+const ResultsStep = ({ selectedAssets, organization, onFinish, onScanAgain,  }: ResultsStepProps) => {
   const scannedCount = selectedAssets.filter(a => a.scanned).length;
   const totalCount = selectedAssets.length;
   const successRate = (scannedCount / totalCount) * 100;
   const allScanned = scannedCount === totalCount;
+
+  const reportService = new ReportService();
+
+  useEffect(() => {
+    uploadScanResult();
+  }, [])
+
+  const uploadScanResult = async () => {
+    try {
+      const scanDate = new Date();
+      const userInfo = JSON.parse(await AsyncStorage.getItem("userData") as string) as { id: string };
+      const generatedUUID = uuid.v4();
+
+      const { key, url } = await reportService.generatePresignedUrl(
+        `${organization.name}_scan_${generatedUUID}.csv`
+      );
+
+      const reportPerAsset: ReportCsvModel[] = selectedAssets.map((value) => {
+        const asset = selectedAssets.find((selectAsset) => value.name === selectAsset.name);
+        return { 
+          assetId: asset!.id, 
+          assetName: value.name, 
+          scanDate: value.scanDate,
+          found: value.scanned ? value.scanned : false, 
+          creationDate: scanDate.toISOString(), 
+          updateDate: scanDate.toISOString()
+        };
+      });
+      
+      await reportService.uploadFileAsCSV(url, reportPerAsset);
+
+      const report: ReportCreation = {
+        authorId: userInfo.id,
+        organizationId: organization.id,
+        title: `${organization.name} QR Code Scan ${scanDate.toISOString()}`,
+        key: key
+      };
+
+      await reportService.createReport(report);
+    } catch (error) {
+      console.log('Erro ao fazer upload:', error);
+    }
+  };
 
   return (
     <View style={styles.stepContainer}>
@@ -773,8 +820,9 @@ const QRCodeReaderScreen = () => {
 
   const handleAssetScanned = (success: boolean) => {
     if (success && currentScanAsset) {
+      const scanDate = new Date();
       setAssets(prev => prev.map(a => 
-        a.id === currentScanAsset.id ? { ...a, scanned: true } : a
+        a.id === currentScanAsset.id ? { ...a, scanDate: scanDate.toISOString(), scanned: true } : a
       ));
     }
     
@@ -860,6 +908,7 @@ const QRCodeReaderScreen = () => {
       {currentStep === 'results' && (
         <ResultsStep
           selectedAssets={selectedAssets}
+          organization={organization as Organization}
           onFinish={handleFinish}
           onScanAgain={handleScanAgain}
         />

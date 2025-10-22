@@ -19,7 +19,7 @@ export interface ReportCsvModel {
     assetId : string;
     assetName: string;
     found: boolean;
-    scanDate?: string;
+    scanDate: string | undefined;
     creationDate: string;
     updateDate: string;
 }

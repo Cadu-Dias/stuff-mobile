@@ -100,7 +100,7 @@ const ResultsScreen = ({ route }: {
       const report: ReportCreation = {
         authorId: userInfo.id,
         organizationId: selectedAssets!.organizationId,
-        title: `${selectedAssets?.organizationName} RFID Scan ${generatedUUID}`,
+        title: `${selectedAssets?.organizationName} RFID Scan ${scanDate.toISOString()}`,
         key: key
       };
 
