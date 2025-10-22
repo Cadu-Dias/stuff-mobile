@@ -3,7 +3,6 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, SafeAreaView, ScrollView, Platform, TouchableOpacity } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { OrganizationService } from '../../services/organization.service';
 import { AssetService } from '../../services/asset.service';
 import { RootStackNavigationProp } from '../../models/stackType';
 
@@ -25,7 +24,6 @@ const themeColors = {
 
 const HomeScreen = () => {
   const navigation = useNavigation<RootStackNavigationProp>();
-  const organizationService = new OrganizationService();
   const assetService = new AssetService();
 
   const [userData, setUserData] = useState<{ firstName: string; lastName: string; username: string } | null>(null);
@@ -45,7 +43,8 @@ const HomeScreen = () => {
 
 
       const assets = await assetService.getOrganizationAssets(organizationId as string);
-      setAssetsNum(assets.length);
+      const activeAssets = assets.filter(asset => !asset.trashBin)
+      setAssetsNum(activeAssets.length);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
     } finally {

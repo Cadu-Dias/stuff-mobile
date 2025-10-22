@@ -57,6 +57,7 @@ const AssetSelectionScreen = () => {
             const assetsWithRFIDTags: AssetWithRFID[] = [];
 
             for(const asset of assets) {
+                if(asset.trashBin) continue;
 
                 const assetInfo = await assetService.getAssetInfo(asset.id);
                 const attributes = assetInfo.attributes.filter(
