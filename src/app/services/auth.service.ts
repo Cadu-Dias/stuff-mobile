@@ -22,15 +22,20 @@ export class AuthService {
             });
 
             if(!response.ok) {
-                throw new Error("Não foi possível realizar o Login");
+                switch(response.status) {
+                    case 400:
+                        throw new Error("O e-mail ou a senha possuem valores invalídos. Insira os valores corretamente.")
+                    case 404:
+                        throw new Error("Não foi encontrado um usuário com esse e-mail ou senha. Tente outra conta.");
+                    default:
+                        throw new Error("Não foi possível realizar o login. Tente novamente mais tarde.");
+                }
+
             }
-
-            const responseJson = await response.json()
-            console.log('Resposta do login:', responseJson);
-
-           await AsyncStorage.setItem("accessToken", responseJson["accessToken"]);
+            
+            const responseJson = await response.json();
+            await AsyncStorage.setItem("accessToken", responseJson["accessToken"]);
         } catch (error: any) {
-            console.error('Erro no loginUser:', error.response?.data || error.message);
             throw error;
         }
     }

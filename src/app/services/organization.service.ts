@@ -83,6 +83,10 @@ export class OrganizationService {
       }
     );
 
+    if(!response.ok) {
+      throw new Error("Não foi possível carregar os membros da Organização!");
+    }
+
     const responseJson = await response.json() as { data: any[]; message: string };
     return responseJson.data;
   }

@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Report, ReportCreation, ReportCsvModel } from "../models/reports.model";
-import { Buffer } from "buffer";
 import * as FileSystem from 'expo-file-system';
 
 export class ReportService {
@@ -11,15 +10,20 @@ export class ReportService {
         try {
             const accessToken = await AsyncStorage.getItem("accessToken");
             if (!accessToken) throw new Error("Usuário não autenticado!");
-            
-            const response = await fetch(`${this.apiUrl}/reports/presigned-url`, {
+
+            const filenameTreated = filename
+                .replace(/ /g, "_")
+                .replace(/-/g, "_")
+                .toLowerCase();
+
+            const response = await fetch(`${this.apiUrl}/reports/upload`, {
                 method: "POST",
                 headers: { 
                     "Authorization": `Bearer ${accessToken}`,
                     "Accept": "application/json",
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ filename })
+                body: JSON.stringify({ filename: filenameTreated })
             })
             
 
@@ -29,6 +33,29 @@ export class ReportService {
             
             const responseJson = await response.json() as { data: { url: string; key: string }};
             return responseJson.data;
+            
+        } catch (error) {
+            console.log(error);
+            throw error;
+        }
+    }
+
+    public async getReport(reportId: string) {
+        try {
+            const accessToken = await AsyncStorage.getItem("accessToken");
+            if (!accessToken) throw new Error("Usuário não autenticado!");
+
+            const response = await fetch(`${this.apiUrl}/reports/${reportId}`, {
+                method: "GET",
+                headers: { "Authorization": `Bearer ${accessToken}` }
+            })
+
+            if(!response.ok) {
+                throw new Error("Não possível obter relatório específico");
+            }
+
+            const responseJson = await response.json() as { message: string; data: Report }
+            return responseJson.data
             
         } catch (error) {
             console.log(error);
@@ -52,6 +79,29 @@ export class ReportService {
 
             const responseJson = await response.json() as Report[]
             return responseJson
+            
+        } catch (error) {
+            console.log(error);
+            throw error;
+        }
+    }
+
+    public async getOrganizationReports(organizationId: string) {
+        try {
+            const accessToken = await AsyncStorage.getItem("accessToken");
+            if (!accessToken) throw new Error("Usuário não autenticado!");
+
+            const response = await fetch(`${this.apiUrl}/organizations/${organizationId}/reports`, {
+                method: "GET",
+                headers: { "Authorization": `Bearer ${accessToken}` }
+            })
+
+            if(!response.ok) {
+                throw new Error("Não possível obter os relatórios");
+            }
+
+            const responseJson = await response.json() as { message: string; data: Report[] }
+            return responseJson.data
             
         } catch (error) {
             console.log(error);
@@ -83,6 +133,33 @@ export class ReportService {
 
             console.log("Relatório criado com sucesso: " + responseJson["message"]);
 
+        } catch (error) {
+            console.log(error);
+            throw error;
+        }
+    }
+
+    public async downloadReport(key: string) {
+        try {
+            const accessToken = await AsyncStorage.getItem("accessToken");
+            if (!accessToken) throw new Error("Usuário não autenticado!");
+
+            const downloadResponse = await fetch(`${this.apiUrl}/reports/download?key=${key}`, {
+                method: "GET",
+                headers: { "Authorization": `Bearer ${accessToken}` }
+            })
+
+            if(!downloadResponse.ok) {
+                throw new Error("Não possível realizar o download do s");
+            }
+
+            const downloadContent = await downloadResponse.json() as { message: string; data: { url: string } }
+            const downloadUrl = downloadContent.data.url
+
+            const csvResponse = await fetch(downloadUrl, { method: "GET" });
+            const csvText = await csvResponse.text();
+            return csvText;
+            
         } catch (error) {
             console.log(error);
             throw error;
@@ -122,6 +199,7 @@ export class ReportService {
         if (!scanResults?.length) {
             return "";
         }
+        
 
         const keys = Object.keys(scanResults[0]) as (keyof ReportCsvModel)[];
         const headers = keys.join(",");
@@ -133,9 +211,13 @@ export class ReportService {
             return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
         };
 
+        console.log(scanResults)
+
         const rows = scanResults.map(result =>
             keys.map(key => escapeValue(result[key] ?? "")).join(",")
         );
+
+        console.log(rows)
 
         return [headers, ...rows].join("\n");
     }

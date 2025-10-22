@@ -14,7 +14,7 @@ export class UserService {
             const response = await fetch(`${this.apiUrl}/users/me`, {
                 method: "GET",
                 headers: {
-                    "Authorization": `Bearer `
+                    "Authorization": `Bearer ${accessToken}`
                 }
             });
 
