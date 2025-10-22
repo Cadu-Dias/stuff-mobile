@@ -3,7 +3,7 @@ import {
   StyleSheet, View, Text, SafeAreaView, FlatList,
   ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, ScrollView
 } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
 import { OrganizationService } from '../../services/organization.service';
 import { AssetService } from '../../services/asset.service';
@@ -420,7 +420,9 @@ const ReportItem = ({ report, onPress }: { report: Report; onPress: (report: Rep
 };
 
 export default function OrganizationDetailScreen() {
+  const route = useRoute();
   const navigation = useNavigation<RootStackNavigationProp>();
+  const { tab } = route.params as { tab: "members" | "assets" | "reports" };
 
   const [organizationId, setOrganizationId] = useState<string>("");
   const [org, setOrg] = useState<Organization | null>(null);
@@ -428,19 +430,17 @@ export default function OrganizationDetailScreen() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   
-  // Estados de loading separados
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [loadingReports, setLoadingReports] = useState(false);
   
-  // Controle de dados já carregados
   const [membersLoaded, setMembersLoaded] = useState(false);
   const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [reportsLoaded, setReportsLoaded] = useState(false);
   
   const [errorMsg, setErrorMsg] = useState("");
-  const [activeTab, setActiveTab] = useState<TabType>('members');
+  const [activeTab, setActiveTab] = useState<TabType>(tab ?? "members");
   const [createAssetModalVisible, setCreateAssetModalVisible] = useState(false);
   
   const organizationService = new OrganizationService();
@@ -576,13 +576,11 @@ export default function OrganizationDetailScreen() {
     }
   }, [activeTab, organizationId, initialLoading, membersLoaded, assetsLoaded, reportsLoaded]);
 
-  // Recarregar ao focar na tela
   useFocusEffect(
     useCallback(() => {
       if (organizationId && !initialLoading) {
         console.log("Tela focada, recarregando tab atual...");
         
-        // Resetar flags para forçar reload
         switch (activeTab) {
           case 'members':
             setMembersLoaded(false);

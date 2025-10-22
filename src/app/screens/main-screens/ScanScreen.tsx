@@ -1,74 +1,305 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, SafeAreaView, ScrollView, ActivityIndicator } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  Alert, 
+  SafeAreaView, 
+  ScrollView, 
+  ActivityIndicator,
+  Modal 
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { RootStackNavigationProp } from '../../models/stackType';
 import useBLE from '../../hooks/useBle';
 
+const RfidRequirementsModal = ({ 
+  visible, 
+  onClose, 
+  onProceed 
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onProceed: () => void;
+}) => {
+  const { requestPermissions, checkBluetoothEnabled, checkLocationEnabled } = useBLE();
+  
+  const [checking, setChecking] = useState(false);
+  const [hasBlePermissions, setHasBlePermissions] = useState(false);
+  const [isBluetoothEnabled, setIsBluetoothEnabled] = useState(false);
+  const [isLocationEnabled, setIsLocationEnabled] = useState(false);
+  const [checked, setChecked] = useState(false);
+
+  const checkRequirements = async () => {
+    setChecking(true);
+    setChecked(false);
+    
+    try {
+      const [bluetooth, location] = await Promise.all([
+        checkBluetoothEnabled(),
+        checkLocationEnabled()
+      ]);
+      
+      setIsBluetoothEnabled(bluetooth);
+      setIsLocationEnabled(location);
+      
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
+      setChecked(true);
+    } catch (error) {
+      console.error("Erro ao verificar requisitos:", error);
+      Alert.alert("Erro", "Não foi possível verificar os requisitos");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (visible) {
+      checkRequirements();
+    } else {
+      setChecked(false);
+      setHasBlePermissions(false);
+    }
+  }, [visible]);
+
+  const canProceed = isBluetoothEnabled && isLocationEnabled;
+
+  const handleProceed = () => {
+    if (!canProceed) {
+      if (!isBluetoothEnabled) {
+        Alert.alert(
+          "Bluetooth Desabilitado",
+          "Por favor, habilite o Bluetooth nas configurações do dispositivo.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+      
+      if (!isLocationEnabled) {
+        Alert.alert(
+          "Localização Desabilitada",
+          "Por favor, habilite a Localização nas configurações do dispositivo.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+    }
+
+    if (hasBlePermissions) {
+      onProceed();
+    } else {
+      requestPermissions(isGranted => {
+        setHasBlePermissions(isGranted);
+        if (isGranted) {
+          onProceed();
+        } else {
+          Alert.alert(
+            "Permissões Necessárias",
+            "As permissões de Bluetooth são necessárias para usar a leitura RFID.",
+            [{ text: "OK" }]
+          );
+        }
+      });
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <TouchableOpacity onPress={onClose}>
+            <Feather name="x" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.modalTitle}>Verificação RFID</Text>
+          <View style={{ width: 24 }} />
+        </View>
+
+        <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.modalHeaderInfo}>
+            <View style={styles.modalIcon}>
+              <MaterialCommunityIcons name="contactless-payment" size={48} color="#2196F3" />
+            </View>
+            <Text style={styles.modalInfoTitle}>Configuração RFID</Text>
+            <Text style={styles.modalInfoSubtitle}>
+              Verificando requisitos necessários para leitura de tags RFID
+            </Text>
+          </View>
+
+          {checking && (
+            <View style={styles.checkingContainer}>
+              <ActivityIndicator size="large" color="#F4A64E" />
+              <Text style={styles.checkingText}>Verificando requisitos...</Text>
+            </View>
+          )}
+
+          {!checking && checked && (
+            <View style={styles.requirementsContainer}>
+              <Text style={styles.requirementsTitle}>Status dos Requisitos</Text>
+
+              {/* Bluetooth */}
+              <View style={styles.requirementCard}>
+                <View style={[
+                  styles.requirementIconLarge,
+                  isBluetoothEnabled ? styles.requirementActiveIcon : styles.requirementInactiveIcon
+                ]}>
+                  <MaterialCommunityIcons 
+                    name={isBluetoothEnabled ? "bluetooth" : "bluetooth-off"} 
+                    size={32} 
+                    color="white" 
+                  />
+                </View>
+                <View style={styles.requirementContent}>
+                  <Text style={styles.requirementTitle}>Bluetooth</Text>
+                  <Text style={[
+                    styles.requirementStatus,
+                    isBluetoothEnabled ? styles.statusActive : styles.statusInactive
+                  ]}>
+                    {isBluetoothEnabled ? '✓ Habilitado' : '✗ Desabilitado'}
+                  </Text>
+                  <Text style={styles.requirementDescription}>
+                    Necessário para comunicação com o leitor RFID
+                  </Text>
+                </View>
+              </View>
+
+              {/* Location */}
+              <View style={styles.requirementCard}>
+                <View style={[
+                  styles.requirementIconLarge,
+                  isLocationEnabled ? styles.requirementActiveIcon : styles.requirementInactiveIcon
+                ]}>
+                  <Feather 
+                    name={isLocationEnabled ? "map-pin" : "map-pin"} 
+                    size={32} 
+                    color="white" 
+                  />
+                </View>
+                <View style={styles.requirementContent}>
+                  <Text style={styles.requirementTitle}>Localização</Text>
+                  <Text style={[
+                    styles.requirementStatus,
+                    isLocationEnabled ? styles.statusActive : styles.statusInactive
+                  ]}>
+                    {isLocationEnabled ? '✓ Habilitada' : '✗ Desabilitada'}
+                  </Text>
+                  <Text style={styles.requirementDescription}>
+                    Exigida pelo Android para uso de Bluetooth
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.requirementCard}>
+                <View style={[
+                  styles.requirementIconLarge,
+                  hasBlePermissions ? styles.requirementActiveIcon : styles.requirementWarningIcon
+                ]}>
+                  <Feather 
+                    name="shield" 
+                    size={32} 
+                    color="white" 
+                  />
+                </View>
+                <View style={styles.requirementContent}>
+                  <Text style={styles.requirementTitle}>Permissões BLE</Text>
+                  <Text style={[
+                    styles.requirementStatus,
+                    hasBlePermissions ? styles.statusActive : styles.statusWarning
+                  ]}>
+                    {hasBlePermissions ? '✓ Concedidas' : '⚠ Pendente'}
+                  </Text>
+                  <Text style={styles.requirementDescription}>
+                    Será solicitada ao prosseguir
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+          {!checking && checked && !canProceed && (
+            <View style={styles.warningCard}>
+              <Feather name="alert-triangle" size={24} color="#FF9800" />
+              <View style={styles.warningContent}>
+                <Text style={styles.warningTitle}>Ação Necessária</Text>
+                <Text style={styles.warningText}>
+                  {!isBluetoothEnabled && !isLocationEnabled
+                    ? 'Habilite o Bluetooth e a Localização nas configurações do dispositivo.'
+                    : !isBluetoothEnabled
+                    ? 'Habilite o Bluetooth nas configurações do dispositivo.'
+                    : 'Habilite a Localização nas configurações do dispositivo.'}
+                </Text>
+              </View>
+            </View>
+          )}
+          {!checking && checked && canProceed && (
+            <View style={styles.successCard}>
+              <Feather name="check-circle" size={24} color="#5ECC63" />
+              <View style={styles.successContent}>
+                <Text style={styles.successTitle}>Tudo Pronto!</Text>
+                <Text style={styles.successText}>
+                  Todos os requisitos foram atendidos. Você pode prosseguir com a leitura RFID.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {!checking && checked && (
+            <View style={styles.helpCard}>
+              <Feather name="info" size={20} color="#2196F3" />
+              <View style={styles.helpContent}>
+                <Text style={styles.helpTitle}>Como funciona?</Text>
+                <Text style={styles.helpText}>
+                  1. O Bluetooth permite a comunicação com o leitor RFID{'\n'}
+                  2. A Localização é exigida pelo Android para Bluetooth{'\n'}
+                  3. As permissões concedem acesso ao Bluetooth LE
+                </Text>
+              </View>
+            </View>
+          )}
+        </ScrollView>
+
+        {!checking && checked && (
+          <View style={styles.modalFooter}>
+            <TouchableOpacity 
+              style={styles.retryButton}
+              onPress={checkRequirements}
+            >
+              <Feather name="refresh-cw" size={18} color="#F4A64E" />
+              <Text style={styles.retryButtonText}>Verificar Novamente</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[
+                styles.proceedButton,
+                !canProceed && styles.proceedButtonDisabled
+              ]}
+              onPress={handleProceed}
+              disabled={!canProceed}
+            >
+              <Text style={styles.proceedButtonText}>
+                {canProceed ? 'Continuar' : 'Requisitos Pendentes'}
+              </Text>
+              {canProceed && <Feather name="arrow-right" size={18} color="white" />}
+            </TouchableOpacity>
+          </View>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
 const ScanScreen = () => {
     const navigation = useNavigation<RootStackNavigationProp>();
-    const { requestPermissions, checkBluetoothEnabled, checkLocationEnabled } = useBLE();
-    
-    const [hasBlePermissions, setHasBlePermissions] = useState(false);
-    const [isBluetoothEnabled, setIsBluetoothEnabled] = useState(false);
-    const [isLocationEnabled, setIsLocationEnabled] = useState(false);
-    const [isCheckingStatus, setIsCheckingStatus] = useState(true);
-
-    const checkServicesStatus = async () => {
-        setIsCheckingStatus(true);
-        try {
-            const [bluetooth, location] = await Promise.all([
-                checkBluetoothEnabled(),
-                checkLocationEnabled()
-            ]);
-            
-            setIsBluetoothEnabled(bluetooth);
-            setIsLocationEnabled(location);
-            console.log("Status - Bluetooth:", bluetooth, "Localização:", location);
-        } catch (error) {
-            console.error("Erro ao verificar status:", error);
-        } finally {
-            setIsCheckingStatus(false);
-        }
-    };
-
-    useFocusEffect(
-        React.useCallback(() => {
-            checkServicesStatus();
-        }, [])
-    );
-
-    const canUseRfid = isBluetoothEnabled && isLocationEnabled;
+    const [rfidModalVisible, setRfidModalVisible] = useState(false);
 
     const handleRfidScanPress = () => {
-        if (!isBluetoothEnabled) {
-            Alert.alert(
-                "Bluetooth Desabilitado",
-                "Por favor, habilite o Bluetooth para usar a leitura RFID.",
-                [{ text: "OK" }]
-            );
-            return;
-        }
+        setRfidModalVisible(true);
+    };
 
-        if (!isLocationEnabled) {
-            Alert.alert(
-                "Localização Desabilitada",
-                "Por favor, habilite a localização para usar a leitura RFID via Bluetooth.",
-                [{ text: "OK" }]
-            );
-            return;
-        }
-
-        if (hasBlePermissions) {
-            navigation.navigate('RFIDScanManager');
-        } else {
-            requestPermissions(isGranted => {
-                setHasBlePermissions(isGranted);
-                if (isGranted) {
-                    navigation.navigate('RFIDScanManager');
-                }
-            });
-        }
+    const handleRfidProceed = () => {
+        setRfidModalVisible(false);
+        navigation.navigate('RFIDScanManager');
     };
 
     const handleQrCodeScanPress = () => {
@@ -76,27 +307,15 @@ const ScanScreen = () => {
     };
 
     const handleHistoryPress = () => {
-        Alert.alert("Funcionalidade Futura", "O histórico de gerenciamento será implementado em breve.");
-    };
-
-    const getRfidStatusMessage = () => {
-        if (isCheckingStatus) return 'Verificando...';
-        if (!isBluetoothEnabled) return 'Bluetooth\ndesabilitado';
-        if (!isLocationEnabled) return 'Localização\ndesabilitada';
-        if (!hasBlePermissions) return 'Configurar\npermissões';
-        return 'Leitura sem\ncontato';
-    };
-
-    const getRfidStatusIcon = () => {
-        if (!isBluetoothEnabled) return 'bluetooth-off';
-        if (!isLocationEnabled) return 'location-exit';
-        return 'contactless-payment';
+        navigation.navigate('MainTabs', {
+            screen: 'Organizations',
+            params: { tab: 'reports' }
+        })
     };
 
     return (
         <SafeAreaView style={styles.safeArea}>
             <ScrollView style={styles.main} showsVerticalScrollIndicator={false}>
-                {/* Header Section */}
                 <View style={styles.headerSection}>
                     <View style={styles.headerIcon}>
                         <MaterialCommunityIcons name="radar" size={32} color="#F4A64E" />
@@ -107,13 +326,10 @@ const ScanScreen = () => {
                         de códigos QR ou tags RFID
                     </Text>
                 </View>
-
-                {/* Quick Actions Section */}
                 <View style={styles.actionsSection}>
                     <Text style={styles.sectionTitle}>Ações Rápidas</Text>
                     
                     <View style={styles.buttonsGrid}>
-                        {/* QR Code Button */}
                         <TouchableOpacity 
                             style={[styles.actionCard, styles.primaryCard]} 
                             onPress={handleQrCodeScanPress}
@@ -130,98 +346,28 @@ const ScanScreen = () => {
                             </View>
                         </TouchableOpacity>
 
-                        {/* RFID Button */}
                         <TouchableOpacity 
-                            style={[
-                                styles.actionCard, 
-                                canUseRfid ? styles.secondaryCard : styles.disabledCard
-                            ]} 
+                            style={[styles.actionCard, styles.secondaryCard]} 
                             onPress={handleRfidScanPress}
-                            disabled={!canUseRfid}
                         >
                             <View style={styles.cardIconContainer}>
                                 <MaterialCommunityIcons 
-                                    name={getRfidStatusIcon()} 
+                                    name="contactless-payment" 
                                     size={28} 
                                     color="white" 
                                 />
                             </View>
                             <Text style={styles.cardTitle}>RFID</Text>
                             <Text style={styles.cardDescription}>
-                                {getRfidStatusMessage()}
+                                Leitura sem{'\n'}contato
                             </Text>
-                            {canUseRfid && (
-                                <View style={styles.cardArrow}>
-                                    <Feather name="arrow-right" size={16} color="white" />
-                                </View>
-                            )}
-                            {!canUseRfid && (
-                                <View style={styles.warningBadge}>
-                                    <Feather name="alert-triangle" size={12} color="#FF6B6B" />
-                                </View>
-                            )}
+                            <View style={styles.cardArrow}>
+                                <Feather name="arrow-right" size={16} color="white" />
+                            </View>
                         </TouchableOpacity>
                     </View>
-
-                    {/* Status Messages */}
-                    {!canUseRfid && !isCheckingStatus && (
-                        <View style={styles.statusMessage}>
-                            <Feather name="info" size={16} color="#FF9800" />
-                            <Text style={styles.statusMessageText}>
-                                {!isBluetoothEnabled && !isLocationEnabled
-                                    ? 'Habilite o Bluetooth e a Localização para usar RFID'
-                                    : !isBluetoothEnabled
-                                    ? 'Habilite o Bluetooth para usar RFID'
-                                    : 'Habilite a Localização para usar RFID'}
-                            </Text>
-                        </View>
-                    )}
                 </View>
 
-                {/* Requirements Section */}
-                <View style={styles.requirementsSection}>
-                    <Text style={styles.sectionTitle}>Requisitos para RFID</Text>
-                    
-                    <View style={styles.requirementItem}>
-                        <View style={[
-                            styles.requirementIcon,
-                            isBluetoothEnabled && styles.requirementIconActive
-                        ]}>
-                            <Feather 
-                                name={isBluetoothEnabled ? "check" : "x"} 
-                                size={16} 
-                                color="white" 
-                            />
-                        </View>
-                        <Text style={styles.requirementText}>Bluetooth habilitado</Text>
-                        {isCheckingStatus && <ActivityIndicator size="small" color="#F4A64E" />}
-                    </View>
-
-                    <View style={styles.requirementItem}>
-                        <View style={[
-                            styles.requirementIcon,
-                            isLocationEnabled && styles.requirementIconActive
-                        ]}>
-                            <Feather 
-                                name={isLocationEnabled ? "check" : "x"} 
-                                size={16} 
-                                color="white" 
-                            />
-                        </View>
-                        <Text style={styles.requirementText}>Localização habilitada</Text>
-                        {isCheckingStatus && <ActivityIndicator size="small" color="#F4A64E" />}
-                    </View>
-
-                    <TouchableOpacity 
-                        style={styles.refreshButton}
-                        onPress={checkServicesStatus}
-                    >
-                        <Feather name="refresh-cw" size={16} color="#F4A64E" />
-                        <Text style={styles.refreshButtonText}>Verificar novamente</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* Additional Options Section */}
                 <View style={styles.additionalSection}>
                     <Text style={styles.sectionTitle}>Outras Opções</Text>
                     
@@ -238,25 +384,27 @@ const ScanScreen = () => {
                         <View style={styles.optionArrow}>
                             <Feather name="chevron-right" size={20} color="#ccc" />
                         </View>
-                        <View style={styles.comingSoonBadge}>
-                            <Text style={styles.comingSoonText}>Em breve</Text>
-                        </View>
                     </TouchableOpacity>
                 </View>
 
-                {/* Tips Section */}
                 <View style={styles.tipsSection}>
                     <View style={styles.tipCard}>
                         <Feather name="info" size={20} color="#5ECC63" />
                         <View style={styles.tipContent}>
                             <Text style={styles.tipTitle}>Dica</Text>
                             <Text style={styles.tipText}>
-                                Para melhor resultado na leitura RFID, mantenha o dispositivo próximo à tag e certifique-se de que o Bluetooth e a Localização estejam habilitados
+                                Para leitura RFID, mantenha o dispositivo próximo à tag. Os requisitos serão verificados antes de iniciar.
                             </Text>
                         </View>
                     </View>
                 </View>
             </ScrollView>
+
+            <RfidRequirementsModal
+                visible={rfidModalVisible}
+                onClose={() => setRfidModalVisible(false)}
+                onProceed={handleRfidProceed}
+            />
         </SafeAreaView>
     );
 };
@@ -343,9 +491,6 @@ const styles = StyleSheet.create({
     secondaryCard: {
         backgroundColor: '#2196F3',
     },
-    disabledCard: {
-        backgroundColor: '#B0B0B0',
-    },
     cardIconContainer: {
         alignSelf: 'flex-start',
     },
@@ -364,88 +509,6 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 16,
         right: 16,
-    },
-    warningBadge: {
-        position: 'absolute',
-        top: 8,
-        right: 8,
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        backgroundColor: 'white',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-
-    // Status Message
-    statusMessage: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#FFF3E0',
-        padding: 12,
-        borderRadius: 8,
-        marginTop: 12,
-        gap: 8,
-    },
-    statusMessageText: {
-        flex: 1,
-        fontSize: 13,
-        color: '#F57C00',
-        fontWeight: '500',
-    },
-
-    // Requirements Section
-    requirementsSection: {
-        paddingHorizontal: 20,
-        marginBottom: 20,
-    },
-    requirementItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'white',
-        padding: 14,
-        borderRadius: 10,
-        marginBottom: 8,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 2,
-    },
-    requirementIcon: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: '#C62828',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 12,
-    },
-    requirementIconActive: {
-        backgroundColor: '#5ECC63',
-    },
-    requirementText: {
-        flex: 1,
-        fontSize: 14,
-        color: '#333',
-        fontWeight: '500',
-    },
-    refreshButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'white',
-        padding: 12,
-        borderRadius: 10,
-        marginTop: 8,
-        gap: 8,
-        borderWidth: 1,
-        borderColor: '#F4A64E',
-    },
-    refreshButtonText: {
-        fontSize: 14,
-        color: '#F4A64E',
-        fontWeight: '600',
     },
 
     // Additional Options Section
@@ -539,6 +602,281 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#666',
         lineHeight: 16,
+    },
+
+    // Modal Styles
+    modalContainer: {
+        flex: 1,
+        backgroundColor: '#F5F5F5',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e0e0e0',
+        backgroundColor: 'white',
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#333',
+    },
+    modalContent: {
+        flex: 1,
+        padding: 16,
+    },
+    modalHeaderInfo: {
+        alignItems: 'center',
+        backgroundColor: 'white',
+        padding: 24,
+        borderRadius: 12,
+        marginBottom: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    modalIcon: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#E3F2FD',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    modalInfoTitle: {
+        fontSize: 22,
+        fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 8,
+    },
+    modalInfoSubtitle: {
+        fontSize: 14,
+        color: '#666',
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+
+    // Checking State
+    checkingContainer: {
+        backgroundColor: 'white',
+        borderRadius: 12,
+        padding: 40,
+        alignItems: 'center',
+        gap: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    checkingText: {
+        fontSize: 16,
+        color: '#666',
+        fontWeight: '500',
+    },
+
+    // Requirements
+    requirementsContainer: {
+        gap: 12,
+        marginBottom: 20,
+    },
+    requirementsTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 8,
+    },
+    requirementCard: {
+        flexDirection: 'row',
+        backgroundColor: 'white',
+        padding: 16,
+        borderRadius: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+        gap: 16,
+    },
+    requirementIconLarge: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    requirementActiveIcon: {
+        backgroundColor: '#5ECC63',
+    },
+    requirementInactiveIcon: {
+        backgroundColor: '#C62828',
+    },
+    requirementWarningIcon: {
+        backgroundColor: '#FF9800',
+    },
+    requirementContent: {
+        flex: 1,
+        justifyContent: 'center',
+    },
+    requirementTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 4,
+    },
+    requirementStatus: {
+        fontSize: 14,
+        fontWeight: '600',
+        marginBottom: 4,
+    },
+    statusActive: {
+        color: '#5ECC63',
+    },
+    statusInactive: {
+        color: '#C62828',
+    },
+    statusWarning: {
+        color: '#FF9800',
+    },
+    requirementDescription: {
+        fontSize: 12,
+        color: '#666',
+        lineHeight: 16,
+    },
+
+    // Warning Card
+    warningCard: {
+        flexDirection: 'row',
+        backgroundColor: '#FFF3E0',
+        padding: 16,
+        borderRadius: 12,
+        borderLeftWidth: 4,
+        borderLeftColor: '#FF9800',
+        marginBottom: 16,
+        gap: 12,
+    },
+    warningContent: {
+        flex: 1,
+    },
+    warningTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#F57C00',
+        marginBottom: 4,
+    },
+    warningText: {
+        fontSize: 14,
+        color: '#E65100',
+        lineHeight: 20,
+    },
+
+    // Success Card
+    successCard: {
+        flexDirection: 'row',
+        backgroundColor: '#F1F8E9',
+        padding: 16,
+        borderRadius: 12,
+        borderLeftWidth: 4,
+        borderLeftColor: '#5ECC63',
+        marginBottom: 16,
+        gap: 12,
+    },
+    successContent: {
+        flex: 1,
+    },
+    successTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#5ECC63',
+        marginBottom: 4,
+    },
+    successText: {
+        fontSize: 14,
+        color: '#2E7D32',
+        lineHeight: 20,
+    },
+    helpCard: {
+        flexDirection: 'row',
+        backgroundColor: 'white',
+        padding: 16,
+        borderRadius: 12,
+        borderLeftWidth: 4,
+        borderLeftColor: '#2196F3',
+        gap: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+        marginBottom: 20
+    },
+    helpContent: {
+        flex: 1,
+    },
+    helpTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#2196F3',
+        marginBottom: 8,
+    },
+    helpText: {
+        fontSize: 13,
+        color: '#1565C0',
+        lineHeight: 20,
+    },
+
+    // Modal Footer
+    modalFooter: {
+        padding: 16,
+        backgroundColor: 'white',
+        borderTopWidth: 1,
+        borderTopColor: '#e0e0e0',
+        gap: 12,
+    },
+    retryButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'white',
+        paddingVertical: 14,
+        borderRadius: 12,
+        gap: 8,
+        borderWidth: 2,
+        borderColor: '#F4A64E',
+    },
+    retryButtonText: {
+        fontSize: 16,
+        color: '#F4A64E',
+        fontWeight: '600',
+    },
+    proceedButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F4A64E',
+        paddingVertical: 16,
+        borderRadius: 12,
+        gap: 8,
+        shadowColor: '#F4A64E',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    proceedButtonDisabled: {
+        backgroundColor: '#ccc',
+        shadowOpacity: 0,
+        elevation: 0,
+    },
+    proceedButtonText: {
+        fontSize: 16,
+        color: 'white',
+        fontWeight: '600',
     },
 });
 
