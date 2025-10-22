@@ -7,14 +7,36 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
 import { OrganizationService } from '../../services/organization.service';
 import { AssetService } from '../../services/asset.service';
+import { ReportService } from '../../services/reports.service';
 import { Asset } from '../../models/asset.model';
 import { Organization } from '../../models/organization.model';
 import { UserInfo } from '../../models/user.model';
+import { Report } from '../../models/reports.model';
 import { RootStackNavigationProp } from '../../models/stackType';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type TabType = 'members' | 'assets' | 'reports';
 
+const SkeletonItem = () => (
+  <View style={styles.skeletonItem}>
+    <View style={styles.skeletonCircle} />
+    <View style={styles.skeletonContent}>
+      <View style={styles.skeletonLine} />
+      <View style={[styles.skeletonLine, styles.skeletonLineShort]} />
+    </View>
+  </View>
+);
+
+const SkeletonList = ({ count = 5 }: { count?: number }) => (
+  <View style={styles.skeletonContainer}>
+    {Array.from({ length: count }).map((_, index) => (
+      <SkeletonItem key={index} />
+    ))}
+  </View>
+);
+
+
+// Modal de criar ativo (sem alterações)
 const CreateAssetModal = ({ 
   visible, 
   onClose, 
@@ -203,12 +225,14 @@ const TabSelector = ({
   activeTab, 
   onTabChange, 
   membersCount, 
-  assetsCount
+  assetsCount,
+  reportsCount
 }: {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
   membersCount: number;
   assetsCount: number;
+  reportsCount: number;
 }) => {
   return (
     <View style={styles.tabContainer}>
@@ -310,6 +334,91 @@ const AssetItem = ({ item, onPress }: { item: Asset; onPress: (organizationId: s
   </TouchableOpacity>
 );
 
+const ReportItem = ({ report, onPress }: { report: Report; onPress: (report: Report) => void }) => {
+  const formatDate = (dateString: string): string => {
+    try {
+
+      if (!dateString || !dateString.trim()) return '';
+      if (!dateString.includes("T")) return dateString;
+
+      const date = new Date(dateString);
+      
+      if (isNaN(date.getTime())) {
+        console.warn('Data inválida:', dateString);
+        return dateString;
+      }
+
+      return date.toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Erro ao formatar data:', error);
+      return dateString;
+    }
+  };
+
+  const formatReportDateTitle = (title: string): string => {
+    try {
+      if (!title || !title.trim()) return '';
+
+      const scanType = title.includes("RFID Scan") 
+        ? "RFID Scan" 
+          : title.includes("QR Code Scan")
+        ? "QR Code Scan"
+          : null;
+
+      if (!scanType) {
+        console.warn('Tipo de scan não encontrado no título:', title);
+        return title;
+      }
+
+      const parts = title.split(scanType);
+      const textTitle = parts[0]?.trim() || '';
+      const dateStr = parts[1]?.trim() || '';
+
+      console.log('Text Title:', textTitle);
+      console.log('Date String:', dateStr);
+      
+      const formattedDate = formatDate(dateStr);
+      return `${textTitle} ${scanType} ${formattedDate}`.trim();
+      
+    } catch (error) {
+      console.error('Erro ao formatar título do relatório:', error);
+      return title;
+    }
+  }
+
+  return (
+    <TouchableOpacity style={styles.reportCard} onPress={() => onPress(report)}>
+      <View style={styles.reportCardHeader}>
+        <View style={styles.reportIcon}>
+          <Feather name="file-text" size={24} color="#F4A64E" />
+        </View>
+        <View style={styles.reportCardInfo}>
+          <Text style={styles.reportTitle}>{formatReportDateTitle(report.title)}</Text>
+          <View style={styles.reportMeta}>
+            <Feather name="calendar" size={12} color="#888" />
+            <Text style={styles.reportDate}>{formatDate(report.createdAt)}</Text>
+          </View>
+        </View>
+        <Feather name="chevron-right" size={20} color="#ccc" />
+      </View>
+      
+      <View style={styles.reportCardFooter}>
+        <View style={styles.reportBadge}>
+          <Feather name="download" size={12} color="#2196F3" />
+          <Text style={styles.reportBadgeText}>CSV</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 export default function OrganizationDetailScreen() {
   const navigation = useNavigation<RootStackNavigationProp>();
 
@@ -317,13 +426,26 @@ export default function OrganizationDetailScreen() {
   const [org, setOrg] = useState<Organization | null>(null);
   const [members, setMembers] = useState<UserInfo[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [reports, setReports] = useState<Report[]>([]);
+  
+  // Estados de loading separados
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [loadingReports, setLoadingReports] = useState(false);
+  
+  // Controle de dados já carregados
+  const [membersLoaded, setMembersLoaded] = useState(false);
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
+  const [reportsLoaded, setReportsLoaded] = useState(false);
+  
   const [errorMsg, setErrorMsg] = useState("");
   const [activeTab, setActiveTab] = useState<TabType>('members');
   const [createAssetModalVisible, setCreateAssetModalVisible] = useState(false);
   
   const organizationService = new OrganizationService();
   const assetsService = new AssetService();
+  const reportService = new ReportService();
 
   useEffect(() => {
     const loadOrganizationId = async () => {
@@ -335,12 +457,12 @@ export default function OrganizationDetailScreen() {
           setOrganizationId(storedOrgId);
         } else {
           setErrorMsg("ID da organização não encontrado.");
-          setLoading(false);
+          setInitialLoading(false);
         }
       } catch (error) {
         console.error("Erro ao carregar organizationId:", error);
         setErrorMsg("Erro ao carregar ID da organização.");
-        setLoading(false);
+        setInitialLoading(false);
       }
     };
 
@@ -353,8 +475,8 @@ export default function OrganizationDetailScreen() {
       return;
     }
 
-    console.log("Buscando detalhes para organizationId:", organizationId);
-    setLoading(true);
+    console.log("Buscando detalhes da organização:", organizationId);
+    setInitialLoading(true);
     setErrorMsg("");
     
     try {
@@ -363,17 +485,9 @@ export default function OrganizationDetailScreen() {
       if (orgResponse) {
         console.log("Organização carregada:", orgResponse);
         setOrg(orgResponse);
-
-        const [membersResponse, assetsResponse] = await Promise.all([
-          organizationService.getMembers(organizationId),
-          assetsService.getOrganizationAssets(organizationId)
-        ]);
-
-        console.log("Membros carregados:", membersResponse?.length || 0);
-        console.log("Ativos carregados:", assetsResponse?.length || 0);
-
-        setMembers(membersResponse || []);
-        setAssets(assetsResponse || []);
+        
+        // Carregar membros por padrão (primeira tab)
+        await fetchMembers();
       } else {
         setErrorMsg("Organização não encontrada.");
       }
@@ -381,38 +495,123 @@ export default function OrganizationDetailScreen() {
       setErrorMsg("Erro ao buscar detalhes da organização.");
       console.error("Error fetching organization details:", err);
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
   }, [organizationId]);
 
-  // ✅ Executa fetch quando organizationId mudar
+  const fetchMembers = useCallback(async () => {
+    if (!organizationId || membersLoaded) return;
+
+    setLoadingMembers(true);
+    try {
+      const membersResponse = await organizationService.getMembers(organizationId);
+      console.log("Membros carregados:", membersResponse?.length || 0);
+      setMembers(membersResponse || []);
+      setMembersLoaded(true);
+    } catch (error) {
+      console.error("Erro ao buscar membros:", error);
+      Alert.alert("Erro", "Falha ao carregar membros");
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, [organizationId, membersLoaded]);
+
+  const fetchAssets = useCallback(async () => {
+    if (!organizationId || assetsLoaded) return;
+
+    setLoadingAssets(true);
+    try {
+      const assetsResponse = await assetsService.getOrganizationAssets(organizationId);
+      const activeAssets = assetsResponse.filter(asset => !asset.trashBin);
+
+      console.log("Ativos carregados:", activeAssets?.length || 0);
+      setAssets(activeAssets || []);
+      setAssetsLoaded(true);
+    } catch (error) {
+      console.error("Erro ao buscar ativos:", error);
+      Alert.alert("Erro", "Falha ao carregar ativos");
+    } finally {
+      setLoadingAssets(false);
+    }
+  }, [organizationId, assetsLoaded]);
+
+  const fetchReports = useCallback(async () => {
+    if (!organizationId || reportsLoaded) return;
+
+    setLoadingReports(true);
+    try {
+      const reportsData = await reportService.getOrganizationReports(organizationId);
+      console.log("Relatórios carregados:", reportsData?.length || 0);
+      setReports(reportsData || []);
+      setReportsLoaded(true);
+    } catch (error) {
+      console.error("Erro ao buscar relatórios:", error);
+      Alert.alert("Erro", "Falha ao carregar relatórios");
+    } finally {
+      setLoadingReports(false);
+    }
+  }, [organizationId, reportsLoaded]);
+
+  // Carregar organização inicial
   useEffect(() => {
     if (organizationId) {
       fetchOrganizationDetails();
     }
   }, [organizationId, fetchOrganizationDetails]);
 
-  // ✅ Recarrega ao focar na tela
+  // Carregar dados quando trocar de tab
+  useEffect(() => {
+    if (!organizationId || initialLoading) return;
+
+    switch (activeTab) {
+      case 'members':
+        if (!membersLoaded) fetchMembers();
+        break;
+      case 'assets':
+        if (!assetsLoaded) fetchAssets();
+        break;
+      case 'reports':
+        if (!reportsLoaded) fetchReports();
+        break;
+    }
+  }, [activeTab, organizationId, initialLoading, membersLoaded, assetsLoaded, reportsLoaded]);
+
+  // Recarregar ao focar na tela
   useFocusEffect(
     useCallback(() => {
-      if (organizationId) {
-        console.log("Tela focada, recarregando dados...");
-        fetchOrganizationDetails();
+      if (organizationId && !initialLoading) {
+        console.log("Tela focada, recarregando tab atual...");
+        
+        // Resetar flags para forçar reload
+        switch (activeTab) {
+          case 'members':
+            setMembersLoaded(false);
+            break;
+          case 'assets':
+            setAssetsLoaded(false);
+            break;
+          case 'reports':
+            setReportsLoaded(false);
+            break;
+        }
       }
-    }, [organizationId, fetchOrganizationDetails])
+    }, [organizationId, activeTab, initialLoading])
   );
 
   const handleAssetCreated = (newAsset: Asset) => {
     setAssets(prevAssets => [newAsset, ...prevAssets]);
   };
 
+  const handleReportPress = (report: Report) => {
+    navigation.navigate('ReportDetail', { report });
+  };
+
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+  };
+
   const renderHeader = () => {
-    if (!org) {
-      console.log("renderHeader: org é null");
-      return null;
-    }
-    
-    console.log("renderHeader: Renderizando com org:", org.name);
+    if (!org) return null;
     
     return (
       <View style={styles.header}>
@@ -424,7 +623,12 @@ export default function OrganizationDetailScreen() {
   };
 
   const renderTabContent = () => {
+    // Tab de Membros
     if (activeTab === 'members') {
+      if (loadingMembers) {
+        return <SkeletonList count={6} />;
+      }
+
       return (
         <FlatList
           data={members}
@@ -443,30 +647,46 @@ export default function OrganizationDetailScreen() {
       );
     }
 
+    // Tab de Relatórios
     if (activeTab === 'reports') {
+      if (loadingReports) {
+        return <SkeletonList count={4} />;
+      }
+
       return (
-        <View style={styles.constructionContainer}>
-          <Feather name="tool" size={64} color="#F4A64E" />
-          <Text style={styles.constructionTitle}>Em Construção</Text>
-          <Text style={styles.constructionText}>
-            A funcionalidade de relatórios está sendo desenvolvida e estará disponível em breve.
-          </Text>
-          <View style={styles.constructionBadge}>
-            <Feather name="clock" size={16} color="#F4A64E" />
-            <Text style={styles.constructionBadgeText}>Em desenvolvimento</Text>
-          </View>
-        </View>
+        <FlatList
+          data={reports}
+          renderItem={({ item }) => <ReportItem report={item} onPress={handleReportPress} />}
+          keyExtractor={item => item.id}
+          style={styles.tabContent}
+          contentContainerStyle={{ paddingBottom: 20 }}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Feather name="file-text" size={48} color="#ccc" />
+              <Text style={styles.emptyText}>Nenhum relatório disponível</Text>
+              <Text style={styles.emptySubtext}>
+                Os relatórios de verificação aparecerão aqui
+              </Text>
+            </View>
+          }
+          showsVerticalScrollIndicator={false}
+        />
       );
     }
 
+    // Tab de Ativos
     const handleAssetPress = (organizationId: string, assetId: string) => {
       navigation.navigate('AssetDetails', { organizationId, assetId });
     };
 
+    if (loadingAssets) {
+      return <SkeletonList count={5} />;
+    }
+
     return (
       <View style={styles.assetsTabContainer}>
         <FlatList
-          data={assets.filter((assets) => !assets.trashBin)}
+          data={assets}
           renderItem={({ item }) => <AssetItem item={item} onPress={handleAssetPress} />}
           keyExtractor={item => item.id}
           style={styles.tabContent}
@@ -497,7 +717,8 @@ export default function OrganizationDetailScreen() {
     );
   };
 
-  if (loading) {
+  // Loading inicial full-screen
+  if (initialLoading) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loadingContainer}>
@@ -508,6 +729,7 @@ export default function OrganizationDetailScreen() {
     );
   }
 
+  // Erro full-screen
   if (errorMsg) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -529,9 +751,10 @@ export default function OrganizationDetailScreen() {
         
         <TabSelector
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={handleTabChange}
           membersCount={members.length}
           assetsCount={assets.length}
+          reportsCount={reports.length}
         />
         
         {renderTabContent()}
@@ -547,7 +770,6 @@ export default function OrganizationDetailScreen() {
   );
 }
 
-// ... (styles permanecem iguais)
 const styles = StyleSheet.create({
   safeArea: { 
     flex: 1, 
@@ -569,6 +791,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFF0E0',
+  },
+  tabLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 60,
+  },
+  tabLoadingText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
   },
   loadingText: {
     fontSize: 16,
@@ -598,6 +832,39 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  // Skeleton Styles
+  skeletonContainer: {
+    flex: 1,
+    padding: 0,
+  },
+  skeletonItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 16,
+    marginBottom: 8,
+    borderRadius: 12,
+  },
+  skeletonCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E0E0E0',
+    marginRight: 12,
+  },
+  skeletonContent: {
+    flex: 1,
+    gap: 8,
+  },
+  skeletonLine: {
+    height: 14,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 4,
+    width: '100%',
+  },
+  skeletonLineShort: {
+    width: '60%',
+  },
   header: {
     marginBottom: 20,
     paddingBottom: 15,
@@ -621,7 +888,6 @@ const styles = StyleSheet.create({
     color: '#888', 
     fontStyle: 'italic',
   },
-
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: '#fff',
@@ -742,6 +1008,69 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
+  reportCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+    borderLeftWidth: 4,
+    borderLeftColor: '#F4A64E',
+  },
+  reportCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  reportIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFF0E0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  reportCardInfo: {
+    flex: 1,
+  },
+  reportTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 6,
+  },
+  reportMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  reportDate: {
+    fontSize: 13,
+    color: '#888',
+  },
+  reportCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+  },
+  reportBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 6,
+  },
+  reportBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2196F3',
+  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -752,7 +1081,13 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: 'center',
     fontSize: 16,
+    fontWeight: '600',
     color: '#666',
+  },
+  emptySubtext: {
+    textAlign: 'center',
+    fontSize: 14,
+    color: '#999',
   },
   emptyCreateButton: {
     flexDirection: 'row',
@@ -791,40 +1126,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 6,
     elevation: 8,
-  },
-  constructionContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-    gap: 20,
-  },
-  constructionTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginTop: 16,
-  },
-  constructionText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  constructionBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF0E0',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 8,
-    marginTop: 8,
-  },
-  constructionBadgeText: {
-    color: '#F4A64E',
-    fontSize: 14,
-    fontWeight: '600',
   },
   modalContainer: {
     flex: 1,
