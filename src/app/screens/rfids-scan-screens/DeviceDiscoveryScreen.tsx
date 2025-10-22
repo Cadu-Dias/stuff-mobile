@@ -8,6 +8,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -23,31 +24,32 @@ const DeviceDiscoveryScreen = () => {
     allDevices,
     isDiscovering,
     scanForPeripherals,
-    connectToDevice,
-    connectedDevice,
+    testConnection,
+    disconnectFromDevice,
     cancelDiscovery,
   } = useBLE();
 
   const [connectingTo, setConnectingTo] = useState<BluetoothDevice | null>(null);
+  const [connectableDevice, setConectableDevice] = useState<BluetoothDevice | null>(null);
+  const [isConnectable, setIsConnectable] = useState<boolean>(false);
 
   useFocusEffect(
     useCallback(() => {
       return () => {
-        if (isDiscovering && !connectedDevice) {
+        if (isDiscovering) {
           console.log('Tela perdeu o foco sem conexão, cancelando a busca de dispositivos.');
           cancelDiscovery();
         }
       };
-    }, [isDiscovering, connectedDevice, cancelDiscovery])
+    }, [isDiscovering, cancelDiscovery])
   );
 
   useEffect(() => {
     let navigationTimeout: NodeJS.Timeout | null = null;
-    if (connectedDevice) {
+    if (isConnectable) {
       console.log('Dispositivo conectado! Redirecionando em 1 segundo...');
       navigationTimeout = setTimeout(async () => {
-        await AsyncStorage.setItem("device-info", JSON.stringify({  name: connectedDevice.name, address: connectedDevice.address }));
-        navigation.navigate('RFIDScanManager');
+        
       }, 1000);
     }
     return () => {
@@ -55,16 +57,33 @@ const DeviceDiscoveryScreen = () => {
         clearTimeout(navigationTimeout);
       }
     };
-  }, [connectedDevice, navigation]);
+  }, [isConnectable, navigation]);
 
   const handleConnectPress = async (device: BluetoothDevice) => {
-    if (connectingTo || connectedDevice) return;
+    if (connectingTo) {
+      console.log("Já existe uma conexão em andamento");
+      return;
+    }
 
-    setConnectingTo(device);
     try {
-      await connectToDevice(device.address);
-    } catch (error) {
-      console.error("Falha ao conectar:", error);
+      setConnectingTo(device);
+      const isDeviceConnectable = await testConnection(device.address);
+      
+      if (isDeviceConnectable) {
+        setConectableDevice(device);
+        setIsConnectable(true);
+
+        await AsyncStorage.setItem("device-info", JSON.stringify({ name: device.name, address: device.address }));
+        setTimeout(() => {
+          navigation.navigate('RFIDScanManager');
+        }, 2000);
+        
+      } else {
+        Alert.alert("Falha na Conexão", "Não foi possível conectar ao dispositivo. Tente novamente.", [{ text: "OK" }]);
+      }
+      
+    } catch (error: any) {
+      Alert.alert("Erro", error.message || "Erro desconhecido ao conectar", [{ text: "OK" }]);
     } finally {
       setConnectingTo(null);
     }
@@ -72,7 +91,7 @@ const DeviceDiscoveryScreen = () => {
 
   const renderDeviceItem = ({ item }: { item: BluetoothDevice }) => {
     const isConnecting = connectingTo?.id === item.id;
-    const isConnected = connectedDevice?.id === item.id;
+    const isConnected = connectableDevice?.id === item.id;
 
     return (
       <TouchableOpacity
@@ -221,7 +240,7 @@ const DeviceDiscoveryScreen = () => {
           />
         </View>
 
-        {connectedDevice && (
+        {connectableDevice && (
           <View style={styles.statusCard}>
             <View style={styles.statusIcon}>
               <Feather name="wifi" size={20} color="#5ECC63" />
