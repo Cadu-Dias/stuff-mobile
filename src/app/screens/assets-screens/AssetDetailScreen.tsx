@@ -14,6 +14,7 @@ import { RootStackNavigationProp } from '../../models/stackType';
 import { AttributeService } from '../../services/attribute.service';
 import useBLE from '../../hooks/useBle';
 import { BluetoothDevice } from 'react-native-bluetooth-classic';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ATTRIBUTE_TYPES = {
     number: 'Número',
@@ -48,17 +49,37 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     } = useBLE();
 
     const [connectingTo, setConnectingTo] = useState<BluetoothDevice | null>(null);
-    const [scanStage, setScanStage] = useState<'discovery' | 'scanning'>('discovery');
+    const [scanStage, setScanStage] = useState<'confirmation' | 'discovery' | 'scanning'>('discovery');
+    const [savedDevice, setSavedDevice] = useState<{name: string, address: string} | null>(null);
 
+    // Verificar dispositivo salvo ao abrir o modal
     useEffect(() => {
         if (visible) {
-            setScanStage('discovery');
-            scanForPeripherals();
+            checkSavedDevice();
         } else {
             cancelDiscovery();
             disconnectFromDevice();
         }
     }, [visible]);
+
+    const checkSavedDevice = async () => {
+        try {
+            const deviceInfoStr = await AsyncStorage.getItem("device-info");
+            if (deviceInfoStr) {
+                const deviceInfo = JSON.parse(deviceInfoStr);
+                setSavedDevice(deviceInfo);
+                setScanStage('confirmation');
+            } else {
+                setSavedDevice(null);
+                setScanStage('discovery');
+                scanForPeripherals();
+            }
+        } catch (error) {
+            console.error("Erro ao verificar dispositivo salvo:", error);
+            setScanStage('discovery');
+            scanForPeripherals();
+        }
+    };
 
     useEffect(() => {
         if (connectedDevice) {
@@ -75,12 +96,60 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
         }
     }, [scannedRfids, scanStage]);
 
+    const handleUseSavedDevice = async () => {
+        if (!savedDevice) return;
+
+        setConnectingTo({ address: savedDevice.address, name: savedDevice.name } as BluetoothDevice);
+        
+        try {
+            await connectToDevice(savedDevice.address);
+        } catch (error) {
+            console.error("Falha ao conectar ao dispositivo salvo:", error);
+            Alert.alert(
+                "Erro de Conexão", 
+                "Não foi possível conectar ao dispositivo anterior. Deseja procurar novos dispositivos?",
+                [
+                    {
+                        text: "Cancelar",
+                        style: "cancel",
+                        onPress: () => {
+                            setConnectingTo(null);
+                            onClose();
+                        }
+                    },
+                    {
+                        text: "Procurar",
+                        onPress: async () => {
+                            await handleUseNewDevice();
+                        }
+                    }
+                ]
+            );
+        } finally {
+            setConnectingTo(null);
+        }
+    };
+
+    const handleUseNewDevice = async () => {
+        try {
+            await AsyncStorage.removeItem("device-info");
+            setSavedDevice(null);
+            setScanStage('discovery');
+            scanForPeripherals();
+        } catch (error) {
+            console.error("Erro ao limpar dispositivo salvo:", error);
+            setScanStage('discovery');
+            scanForPeripherals();
+        }
+    };
+
     const handleConnectPress = async (device: BluetoothDevice) => {
         if (connectingTo || connectedDevice) return;
 
         setConnectingTo(device);
         try {
             await connectToDevice(device.address);
+            await AsyncStorage.setItem("device-info", JSON.stringify({ name: device.name, address: device.address }));
         } catch (error) {
             console.error("Falha ao conectar:", error);
             Alert.alert("Erro", "Não foi possível conectar ao dispositivo");
@@ -94,6 +163,79 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
         disconnectFromDevice();
         onClose();
     };
+
+    const renderConfirmationStage = () => (
+        <>
+            <View style={styles.scanModalHeader}>
+                <TouchableOpacity onPress={handleClose}>
+                    <Feather name="x" size={24} color="#333" />
+                </TouchableOpacity>
+                <Text style={styles.scanModalTitle}>Dispositivo Salvo</Text>
+                <View style={{ width: 24 }} />
+            </View>
+
+            <View style={styles.scanModalContent}>
+                <View style={styles.rfidScanHeader}>
+                    <View style={styles.rfidScanIcon}>
+                        <MaterialCommunityIcons name="bluetooth-connect" size={32} color="#F4A64E" />
+                    </View>
+                    <Text style={styles.rfidScanTitle}>Usar Dispositivo Anterior?</Text>
+                    <Text style={styles.rfidScanSubtitle}>
+                        Encontramos um dispositivo conectado anteriormente
+                    </Text>
+                </View>
+
+                <View style={styles.savedDeviceCard}>
+                    <View style={styles.savedDeviceIcon}>
+                        <MaterialCommunityIcons name="bluetooth" size={32} color="#4CAF50" />
+                    </View>
+                    <View style={styles.savedDeviceInfo}>
+                        <Text style={styles.savedDeviceName}>{savedDevice?.name || 'Dispositivo Sem Nome'}</Text>
+                        <Text style={styles.savedDeviceAddress}>{savedDevice?.address}</Text>
+                    </View>
+                    <View style={styles.savedDeviceBadge}>
+                        <Feather name="check-circle" size={16} color="#4CAF50" />
+                        <Text style={styles.savedDeviceBadgeText}>Salvo</Text>
+                    </View>
+                </View>
+
+                <View style={styles.confirmationButtons}>
+                    <TouchableOpacity
+                        style={[styles.confirmationButton, styles.useSavedButton]}
+                        onPress={handleUseSavedDevice}
+                        disabled={!!connectingTo}
+                    >
+                        {connectingTo ? (
+                            <ActivityIndicator size="small" color="white" />
+                        ) : (
+                            <>
+                                <Feather name="zap" size={20} color="white" />
+                                <Text style={styles.confirmationButtonText}>Usar Este Dispositivo</Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[styles.confirmationButton, styles.useNewButton]}
+                        onPress={handleUseNewDevice}
+                        disabled={!!connectingTo}
+                    >
+                        <Feather name="search" size={20} color="#F4A64E" />
+                        <Text style={[styles.confirmationButtonText, styles.useNewButtonText]}>
+                            Procurar Outro
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+
+                <View style={styles.confirmationHint}>
+                    <Feather name="info" size={16} color="#2196F3" />
+                    <Text style={styles.confirmationHintText}>
+                        Conectar ao dispositivo salvo é mais rápido. Você pode procurar outro se preferir.
+                    </Text>
+                </View>
+            </View>
+        </>
+    );
 
     const renderDiscoveryStage = () => (
         <>
@@ -226,7 +368,9 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
             <SafeAreaView style={styles.scanModalContainer}>
-                {scanStage === 'discovery' ? renderDiscoveryStage() : renderScanningStage()}
+                {scanStage === 'confirmation' && renderConfirmationStage()}
+                {scanStage === 'discovery' && renderDiscoveryStage()}
+                {scanStage === 'scanning' && renderScanningStage()}
             </SafeAreaView>
         </Modal>
     );
@@ -237,7 +381,7 @@ interface EditModalProps {
     type: 'asset' | 'new-attribute';
     data: any;
     assetId?: string;
-    onSave: (data: any) => void;
+    onSave: (data: any) => Promise<void>;
     onCancel: () => void;
 }
 
@@ -1766,13 +1910,13 @@ export default function AssetDetailScreen() {
         );
     };
 
-    const handleSave = (data: any) => {
+    const handleSave = async (data: any) => {
         switch (editType) {
             case 'asset':
-                handleSaveAsset(data);
+                await handleSaveAsset(data);
                 break;
             case 'new-attribute':
-                handleSaveNewAttribute(data);
+                await handleSaveNewAttribute(data);
                 break;
         }
     };
@@ -1844,7 +1988,7 @@ export default function AssetDetailScreen() {
                     <View style={styles.infoGrid}>
                         <View style={styles.infoItem}>
                             <Text style={styles.infoLabel}>Tipo</Text>
-                            <Text style={styles.infoValue}>{asset.type}</Text>
+                            <Text style={styles.infoValue}>{asset.type === "unique" ? "Único" : "Replicável"}</Text>
                         </View>
                         <View style={styles.infoItem}>
                             <Text style={styles.infoLabel}>Quantidade</Text>
@@ -2532,6 +2676,108 @@ const styles = StyleSheet.create({
     },
 
     // Estilos do Modal de Scan RFID
+    savedDeviceCard: {
+        backgroundColor: 'white',
+        borderRadius: 12,
+        padding: 16,
+        marginVertical: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderLeftWidth: 4,
+        borderLeftColor: '#4CAF50',
+    },
+    savedDeviceIcon: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#E8F5E9',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 16,
+    },
+    savedDeviceInfo: {
+        flex: 1,
+    },
+    savedDeviceName: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 4,
+    },
+    savedDeviceAddress: {
+        fontSize: 13,
+        color: '#666',
+        fontFamily: 'monospace',
+    },
+    savedDeviceBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#E8F5E9',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 12,
+        gap: 4,
+    },
+    savedDeviceBadgeText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#4CAF50',
+    },
+    confirmationButtons: {
+        gap: 12,
+        marginTop: 10,
+    },
+    confirmationButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        borderRadius: 12,
+        gap: 10,
+    },
+    useSavedButton: {
+        backgroundColor: '#F4A64E',
+        shadowColor: '#F4A64E',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    useNewButton: {
+        backgroundColor: 'white',
+        borderWidth: 2,
+        borderColor: '#F4A64E',
+    },
+    confirmationButtonText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: 'white',
+    },
+    useNewButtonText: {
+        color: '#F4A64E',
+    },
+    confirmationHint: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: '#E3F2FD',
+        padding: 14,
+        borderRadius: 10,
+        gap: 10,
+        marginTop: 20,
+        borderLeftWidth: 3,
+        borderLeftColor: '#2196F3',
+    },
+    confirmationHintText: {
+        flex: 1,
+        fontSize: 13,
+        color: '#1565C0',
+        lineHeight: 19,
+    },
     scanModalContainer: {
         flex: 1,
         backgroundColor: '#F5F5F5',
