@@ -29,7 +29,6 @@ const ATTRIBUTE_TYPES = {
     rfid: 'RFID'
 };
 
-// Modal de Scan RFID
 interface RFIDScanModalProps {
     visible: boolean;
     onClose: () => void;
@@ -52,7 +51,6 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     const [scanStage, setScanStage] = useState<'confirmation' | 'discovery' | 'scanning'>('discovery');
     const [savedDevice, setSavedDevice] = useState<{name: string, address: string} | null>(null);
 
-    // Verificar dispositivo salvo ao abrir o modal
     useEffect(() => {
         if (visible) {
             checkSavedDevice();

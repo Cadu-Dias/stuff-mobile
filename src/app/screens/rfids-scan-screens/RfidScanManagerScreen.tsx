@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   StyleSheet, View, Text, SafeAreaView, TouchableOpacity,
-  ScrollView, Alert
+  ScrollView
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -50,9 +50,11 @@ const RFIDScanManagerScreen = () => {
     navigation.navigate('AssetSelection');
   };
 
-  const handleStartScan = () => {
+  const handleStartScan = async () => {
     if (!deviceInfo || !selectedAssets) return;
     
+    await AsyncStorage.removeItem("selected-rfid-assets");
+
     // Navegar para tela de scan com os dados necessários
     navigation.navigate('StorageScan', { 
       deviceAddress: deviceInfo.address,
