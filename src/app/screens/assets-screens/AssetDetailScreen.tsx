@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     StyleSheet, View, Text, SafeAreaView, ScrollView,
     ActivityIndicator, TouchableOpacity, TextInput,
-    Alert, Modal, Platform, Switch
+    Alert, Modal, Platform, Switch,
+    Linking
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -45,18 +46,111 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
         cancelDiscovery,
         disconnectFromDevice,
         scannedRfids,
+        checkBluetoothEnabled,
+        checkLocationEnabled,
+        checkNearbyDevicesPermission,
     } = useBLE();
 
     const [connectingTo, setConnectingTo] = useState<BluetoothDevice | null>(null);
     const [scanStage, setScanStage] = useState<'confirmation' | 'discovery' | 'scanning'>('discovery');
     const [savedDevice, setSavedDevice] = useState<{name: string, address: string} | null>(null);
+    
+    // Estados de permissões
+    const [permissionStatus, setPermissionStatus] = useState({
+        bluetooth: false,
+        location: false,
+        nearbyDevices: false,
+    });
+    const [isCheckingPermissions, setIsCheckingPermissions] = useState(false);
+
+    // Verificação de permissões
+    const checkAllPermissions = useCallback(async () => {
+        if (!visible) return;
+
+        try {
+            setIsCheckingPermissions(true);
+            const [bluetooth, location, nearbyDevices] = await Promise.all([
+                checkBluetoothEnabled(),
+                checkLocationEnabled(),
+                checkNearbyDevicesPermission(),
+            ]);
+
+            const newStatus = {
+                bluetooth,
+                location,
+                nearbyDevices,
+            };
+
+            setPermissionStatus(newStatus);
+
+            // Se alguma permissão foi revogada durante uso
+            const allEnabled = bluetooth && location && nearbyDevices;
+            
+            if (!allEnabled) {
+                console.log('⚠️ Permissão revogada no RFIDScanModal');
+                
+                // Parar descoberta se estiver ativa
+                if (isDiscovering) {
+                    await cancelDiscovery();
+                }
+                
+                // Desconectar se estiver conectado
+                if (connectedDevice) {
+                    await disconnectFromDevice();
+                    setScanStage('discovery');
+                }
+            }
+
+            return allEnabled;
+        } catch (error) {
+            console.error('Erro ao verificar permissões:', error);
+            return false;
+        } finally {
+            setIsCheckingPermissions(false);
+        }
+    }, [
+        visible,
+        isDiscovering,
+        connectedDevice,
+        cancelDiscovery,
+        disconnectFromDevice,
+        checkBluetoothEnabled,
+        checkLocationEnabled,
+        checkNearbyDevicesPermission,
+    ]);
+
+    // Verificação constante enquanto modal está aberto
+    useEffect(() => {
+        if (!visible) {
+            console.log('🔕 RFIDScanModal fechado, parando verificações');
+            return;
+        }
+
+        console.log('🔔 RFIDScanModal aberto, iniciando verificações');
+        
+        // Verificação inicial
+        checkAllPermissions();
+
+        // Verificação a cada 2 segundos
+        const interval = setInterval(() => {
+            checkAllPermissions();
+        }, 2000);
+
+        return () => {
+            console.log('🧹 Limpando verificações do RFIDScanModal');
+            clearInterval(interval);
+        };
+    }, [visible, checkAllPermissions]);
 
     useEffect(() => {
         if (visible) {
             checkSavedDevice();
         } else {
+            // Limpar tudo ao fechar
             cancelDiscovery();
             disconnectFromDevice();
+            setScanStage('discovery');
+            setConnectingTo(null);
         }
     }, [visible]);
 
@@ -70,12 +164,21 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
             } else {
                 setSavedDevice(null);
                 setScanStage('discovery');
-                scanForPeripherals();
+                
+                // Só iniciar scan se tiver permissões
+                const hasPermissions = await checkAllPermissions();
+                if (hasPermissions) {
+                    scanForPeripherals();
+                }
             }
         } catch (error) {
             console.error("Erro ao verificar dispositivo salvo:", error);
             setScanStage('discovery');
-            scanForPeripherals();
+            
+            const hasPermissions = await checkAllPermissions();
+            if (hasPermissions) {
+                scanForPeripherals();
+            }
         }
     };
 
@@ -96,6 +199,17 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
 
     const handleUseSavedDevice = async () => {
         if (!savedDevice) return;
+
+        // Verificar permissões antes de conectar
+        const hasPermissions = await checkAllPermissions();
+        if (!hasPermissions) {
+            Alert.alert(
+                'Permissões Necessárias',
+                'Habilite Bluetooth, Localização e Detecção de Dispositivos para continuar.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
 
         setConnectingTo({ address: savedDevice.address, name: savedDevice.name } as BluetoothDevice);
         
@@ -133,16 +247,36 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
             await AsyncStorage.removeItem("device-info");
             setSavedDevice(null);
             setScanStage('discovery');
-            scanForPeripherals();
+            
+            // Verificar permissões antes de escanear
+            const hasPermissions = await checkAllPermissions();
+            if (hasPermissions) {
+                scanForPeripherals();
+            }
         } catch (error) {
             console.error("Erro ao limpar dispositivo salvo:", error);
             setScanStage('discovery');
-            scanForPeripherals();
+            
+            const hasPermissions = await checkAllPermissions();
+            if (hasPermissions) {
+                scanForPeripherals();
+            }
         }
     };
 
     const handleConnectPress = async (device: BluetoothDevice) => {
         if (connectingTo || connectedDevice) return;
+
+        // Verificar permissões antes de conectar
+        const hasPermissions = await checkAllPermissions();
+        if (!hasPermissions) {
+            Alert.alert(
+                'Permissões Necessárias',
+                'Habilite Bluetooth, Localização e Detecção de Dispositivos para continuar.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
 
         setConnectingTo(device);
         try {
@@ -156,167 +290,277 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
         }
     };
 
-    const handleClose = () => {
-        cancelDiscovery();
-        disconnectFromDevice();
+    const handleClose = async () => {
+        await cancelDiscovery();
+        await disconnectFromDevice();
         onClose();
     };
 
-    const renderConfirmationStage = () => (
-        <>
-            <View style={styles.scanModalHeader}>
-                <TouchableOpacity onPress={handleClose}>
-                    <Feather name="x" size={24} color="#333" />
+    const handleScanPress = async () => {
+        const allEnabled = permissionStatus.bluetooth && 
+                          permissionStatus.location && 
+                          permissionStatus.nearbyDevices;
+
+        if (!allEnabled) {
+            const missing = [];
+            if (!permissionStatus.bluetooth) missing.push('Bluetooth');
+            if (!permissionStatus.location) missing.push('Localização');
+            if (!permissionStatus.nearbyDevices) missing.push('Detecção de Dispositivos');
+
+            Alert.alert(
+                'Permissões Necessárias',
+                `Ative: ${missing.join(', ')}.`,
+                [
+                    { text: 'Cancelar', style: 'cancel' },
+                    { 
+                        text: 'Configurações', 
+                        onPress: () => Linking.openSettings() 
+                    }
+                ]
+            );
+            return;
+        }
+
+        if (isDiscovering) {
+            cancelDiscovery();
+        } else {
+            scanForPeripherals();
+        }
+    };
+
+    // Componente de status de permissões
+    const renderPermissionStatus = () => {
+        const allEnabled = permissionStatus.bluetooth && 
+                          permissionStatus.location && 
+                          permissionStatus.nearbyDevices;
+
+        if (allEnabled) return null;
+
+        return (
+            <View style={styles.permissionWarningCard}>
+                <View style={styles.permissionWarningHeader}>
+                    <MaterialCommunityIcons name="alert-circle" size={20} color="#FF9800" />
+                    <Text style={styles.permissionWarningTitle}>Atenção</Text>
+                </View>
+                <View style={styles.permissionStatusList}>
+                    {!permissionStatus.bluetooth && (
+                        <Text style={styles.permissionWarningText}>• Bluetooth desativado</Text>
+                    )}
+                    {!permissionStatus.location && (
+                        <Text style={styles.permissionWarningText}>• Localização desativada</Text>
+                    )}
+                    {!permissionStatus.nearbyDevices && (
+                        <Text style={styles.permissionWarningText}>• Permissão de dispositivos negada</Text>
+                    )}
+                </View>
+                <TouchableOpacity 
+                    style={styles.permissionWarningButton}
+                    onPress={() => Linking.openSettings()}
+                >
+                    <Feather name="settings" size={14} color="#2196F3" />
+                    <Text style={styles.permissionWarningButtonText}>Abrir Configurações</Text>
                 </TouchableOpacity>
-                <Text style={styles.scanModalTitle}>Dispositivo Salvo</Text>
-                <View style={{ width: 24 }} />
             </View>
+        );
+    };
 
-            <View style={styles.scanModalContent}>
-                <View style={styles.rfidScanHeader}>
-                    <View style={styles.rfidScanIcon}>
-                        <MaterialCommunityIcons name="bluetooth-connect" size={32} color="#F4A64E" />
-                    </View>
-                    <Text style={styles.rfidScanTitle}>Usar Dispositivo Anterior?</Text>
-                    <Text style={styles.rfidScanSubtitle}>
-                        Encontramos um dispositivo conectado anteriormente
-                    </Text>
-                </View>
+    const renderConfirmationStage = () => {
+        const allEnabled = permissionStatus.bluetooth && 
+                          permissionStatus.location && 
+                          permissionStatus.nearbyDevices;
 
-                <View style={styles.savedDeviceCard}>
-                    <View style={styles.savedDeviceIcon}>
-                        <MaterialCommunityIcons name="bluetooth" size={32} color="#4CAF50" />
-                    </View>
-                    <View style={styles.savedDeviceInfo}>
-                        <Text style={styles.savedDeviceName}>{savedDevice?.name || 'Dispositivo Sem Nome'}</Text>
-                        <Text style={styles.savedDeviceAddress}>{savedDevice?.address}</Text>
-                    </View>
-                    <View style={styles.savedDeviceBadge}>
-                        <Feather name="check-circle" size={16} color="#4CAF50" />
-                        <Text style={styles.savedDeviceBadgeText}>Salvo</Text>
-                    </View>
-                </View>
-
-                <View style={styles.confirmationButtons}>
-                    <TouchableOpacity
-                        style={[styles.confirmationButton, styles.useSavedButton]}
-                        onPress={handleUseSavedDevice}
-                        disabled={!!connectingTo}
-                    >
-                        {connectingTo ? (
-                            <ActivityIndicator size="small" color="white" />
-                        ) : (
-                            <>
-                                <Feather name="zap" size={20} color="white" />
-                                <Text style={styles.confirmationButtonText}>Usar Este Dispositivo</Text>
-                            </>
-                        )}
+        return (
+            <>
+                <View style={styles.scanModalHeader}>
+                    <TouchableOpacity onPress={handleClose}>
+                        <Feather name="x" size={24} color="#333" />
                     </TouchableOpacity>
+                    <Text style={styles.scanModalTitle}>Dispositivo Salvo</Text>
+                    <View style={{ width: 24 }} />
+                </View>
 
-                    <TouchableOpacity
-                        style={[styles.confirmationButton, styles.useNewButton]}
-                        onPress={handleUseNewDevice}
-                        disabled={!!connectingTo}
-                    >
-                        <Feather name="search" size={20} color="#F4A64E" />
-                        <Text style={[styles.confirmationButtonText, styles.useNewButtonText]}>
-                            Procurar Outro
+                <View style={styles.scanModalContent}>
+                    {renderPermissionStatus()}
+
+                    <View style={styles.rfidScanHeader}>
+                        <View style={styles.rfidScanIcon}>
+                            <MaterialCommunityIcons name="bluetooth-connect" size={32} color="#F4A64E" />
+                        </View>
+                        <Text style={styles.rfidScanTitle}>Usar Dispositivo Anterior?</Text>
+                        <Text style={styles.rfidScanSubtitle}>
+                            Encontramos um dispositivo conectado anteriormente
                         </Text>
-                    </TouchableOpacity>
-                </View>
-
-                <View style={styles.confirmationHint}>
-                    <Feather name="info" size={16} color="#2196F3" />
-                    <Text style={styles.confirmationHintText}>
-                        Conectar ao dispositivo salvo é mais rápido. Você pode procurar outro se preferir.
-                    </Text>
-                </View>
-            </View>
-        </>
-    );
-
-    const renderDiscoveryStage = () => (
-        <>
-            <View style={styles.scanModalHeader}>
-                <TouchableOpacity onPress={handleClose}>
-                    <Feather name="x" size={24} color="#333" />
-                </TouchableOpacity>
-                <Text style={styles.scanModalTitle}>Conectar Leitor RFID</Text>
-                <View style={{ width: 24 }} />
-            </View>
-
-            <View style={styles.scanModalContent}>
-                <View style={styles.rfidScanHeader}>
-                    <View style={styles.rfidScanIcon}>
-                        <MaterialCommunityIcons name="bluetooth-connect" size={32} color="#F4A64E" />
                     </View>
-                    <Text style={styles.rfidScanTitle}>Procurando Dispositivos</Text>
-                    <Text style={styles.rfidScanSubtitle}>
-                        Certifique-se de que o leitor está ligado e próximo
-                    </Text>
-                </View>
 
-                <View style={styles.scanActionButtons}>
-                    <TouchableOpacity
-                        style={[styles.scanActionButton, isDiscovering && styles.scanActionButtonActive]}
-                        onPress={isDiscovering ? cancelDiscovery : scanForPeripherals}
-                    >
-                        {isDiscovering && <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />}
-                        <Text style={styles.scanActionButtonText}>
-                            {isDiscovering ? 'Parando...' : 'Buscar Dispositivos'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
+                    <View style={styles.savedDeviceCard}>
+                        <View style={styles.savedDeviceIcon}>
+                            <MaterialCommunityIcons name="bluetooth" size={32} color="#4CAF50" />
+                        </View>
+                        <View style={styles.savedDeviceInfo}>
+                            <Text style={styles.savedDeviceName}>{savedDevice?.name || 'Dispositivo Sem Nome'}</Text>
+                            <Text style={styles.savedDeviceAddress}>{savedDevice?.address}</Text>
+                        </View>
+                        <View style={styles.savedDeviceBadge}>
+                            <Feather name="check-circle" size={16} color="#4CAF50" />
+                            <Text style={styles.savedDeviceBadgeText}>Salvo</Text>
+                        </View>
+                    </View>
 
-                <ScrollView style={styles.devicesList} showsVerticalScrollIndicator={false}>
-                    {allDevices.length === 0 ? (
-                        <View style={styles.emptyDevices}>
-                            <MaterialCommunityIcons 
-                                name={isDiscovering ? "bluetooth-connect" : "bluetooth-off"} 
-                                size={48} 
-                                color="#ccc" 
-                            />
-                            <Text style={styles.emptyDevicesText}>
-                                {isDiscovering ? 'Procurando...' : 'Nenhum dispositivo encontrado'}
+                    <View style={styles.confirmationButtons}>
+                        <TouchableOpacity
+                            style={[
+                                styles.confirmationButton, 
+                                styles.useSavedButton,
+                                (!allEnabled || !!connectingTo) && styles.buttonDisabled
+                            ]}
+                            onPress={handleUseSavedDevice}
+                            disabled={!allEnabled || !!connectingTo}
+                        >
+                            {connectingTo ? (
+                                <ActivityIndicator size="small" color="white" />
+                            ) : (
+                                <>
+                                    <Feather name="zap" size={20} color="white" />
+                                    <Text style={styles.confirmationButtonText}>
+                                        {allEnabled ? 'Usar Este Dispositivo' : 'Permissões Necessárias'}
+                                    </Text>
+                                </>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[
+                                styles.confirmationButton, 
+                                styles.useNewButton,
+                                (!allEnabled || !!connectingTo) && styles.buttonDisabled
+                            ]}
+                            onPress={handleUseNewDevice}
+                            disabled={!allEnabled || !!connectingTo}
+                        >
+                            <Feather name="search" size={20} color={allEnabled ? "#F4A64E" : "#999"} />
+                            <Text style={[
+                                styles.confirmationButtonText, 
+                                styles.useNewButtonText,
+                                !allEnabled && styles.buttonTextDisabled
+                            ]}>
+                                Procurar Outro
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {allEnabled && (
+                        <View style={styles.confirmationHint}>
+                            <Feather name="info" size={16} color="#2196F3" />
+                            <Text style={styles.confirmationHintText}>
+                                Conectar ao dispositivo salvo é mais rápido. Você pode procurar outro se preferir.
                             </Text>
                         </View>
-                    ) : (
-                        <>
-                            <Text style={styles.devicesListTitle}>
-                                Dispositivos Encontrados ({allDevices.length})
-                            </Text>
-                            {allDevices.map((device) => {
-                                const isConnecting = connectingTo?.id === device.id;
-                                return (
-                                    <TouchableOpacity
-                                        key={device.id}
-                                        style={[styles.deviceCard, isConnecting && styles.deviceCardConnecting]}
-                                        onPress={() => handleConnectPress(device)}
-                                        disabled={isConnecting}
-                                    >
-                                        <View style={styles.deviceCardIcon}>
-                                            <MaterialCommunityIcons name="bluetooth" size={24} color="#F4A64E" />
-                                        </View>
-                                        <View style={styles.deviceCardInfo}>
-                                            <Text style={styles.deviceCardName}>
-                                                {device.name || 'Dispositivo Sem Nome'}
-                                            </Text>
-                                            <Text style={styles.deviceCardAddress}>{device.address}</Text>
-                                        </View>
-                                        {isConnecting ? (
-                                            <ActivityIndicator size="small" color="#F4A64E" />
-                                        ) : (
-                                            <Feather name="chevron-right" size={20} color="#ccc" />
-                                        )}
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </>
                     )}
-                </ScrollView>
-            </View>
-        </>
-    );
+                </View>
+            </>
+        );
+    };
+
+    const renderDiscoveryStage = () => {
+        const allEnabled = permissionStatus.bluetooth && 
+                          permissionStatus.location && 
+                          permissionStatus.nearbyDevices;
+
+        return (
+            <>
+                <View style={styles.scanModalHeader}>
+                    <TouchableOpacity onPress={handleClose}>
+                        <Feather name="x" size={24} color="#333" />
+                    </TouchableOpacity>
+                    <Text style={styles.scanModalTitle}>Conectar Leitor RFID</Text>
+                    <View style={{ width: 24 }} />
+                </View>
+
+                <View style={styles.scanModalContent}>
+                    {renderPermissionStatus()}
+
+                    <View style={styles.rfidScanHeader}>
+                        <View style={styles.rfidScanIcon}>
+                            <MaterialCommunityIcons name="bluetooth-connect" size={32} color="#F4A64E" />
+                        </View>
+                        <Text style={styles.rfidScanTitle}>Procurando Dispositivos</Text>
+                        <Text style={styles.rfidScanSubtitle}>
+                            Certifique-se de que o leitor está ligado e próximo
+                        </Text>
+                    </View>
+
+                    <View style={styles.scanActionButtons}>
+                        <TouchableOpacity
+                            style={[
+                                styles.scanActionButton,
+                                isDiscovering && styles.scanActionButtonActive,
+                                !allEnabled && styles.buttonDisabled
+                            ]}
+                            onPress={handleScanPress}
+                            disabled={!allEnabled}
+                        >
+                            {isDiscovering && <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />}
+                            <Text style={styles.scanActionButtonText}>
+                                {!allEnabled 
+                                    ? 'Permissões Necessárias'
+                                    : isDiscovering ? 'Parando...' : 'Buscar Dispositivos'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    <ScrollView style={styles.devicesList} showsVerticalScrollIndicator={false}>
+                        {allDevices.length === 0 ? (
+                            <View style={styles.emptyDevices}>
+                                <MaterialCommunityIcons 
+                                    name={isDiscovering ? "bluetooth-connect" : "bluetooth-off"} 
+                                    size={48} 
+                                    color="#ccc" 
+                                />
+                                <Text style={styles.emptyDevicesText}>
+                                    {isDiscovering ? 'Procurando...' : 'Nenhum dispositivo encontrado'}
+                                </Text>
+                            </View>
+                        ) : (
+                            <>
+                                <Text style={styles.devicesListTitle}>
+                                    Dispositivos Encontrados ({allDevices.length})
+                                </Text>
+                                {allDevices.map((device) => {
+                                    const isConnecting = connectingTo?.id === device.id;
+                                    return (
+                                        <TouchableOpacity
+                                            key={device.id}
+                                            style={[
+                                                styles.deviceCard, 
+                                                isConnecting && styles.deviceCardConnecting
+                                            ]}
+                                            onPress={() => handleConnectPress(device)}
+                                            disabled={isConnecting || !allEnabled}
+                                        >
+                                            <View style={styles.deviceCardIcon}>
+                                                <MaterialCommunityIcons name="bluetooth" size={24} color="#F4A64E" />
+                                            </View>
+                                            <View style={styles.deviceCardInfo}>
+                                                <Text style={styles.deviceCardName}>
+                                                    {device.name || 'Dispositivo Sem Nome'}
+                                                </Text>
+                                                <Text style={styles.deviceCardAddress}>{device.address}</Text>
+                                            </View>
+                                            {isConnecting ? (
+                                                <ActivityIndicator size="small" color="#F4A64E" />
+                                            ) : (
+                                                <Feather name="chevron-right" size={20} color="#ccc" />
+                                            )}
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </>
+                        )}
+                    </ScrollView>
+                </View>
+            </>
+        );
+    };
 
     const renderScanningStage = () => (
         <>
@@ -1094,12 +1338,72 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
     const { 
         requestPermissions, 
         checkBluetoothEnabled, 
-        checkLocationEnabled 
+        checkLocationEnabled,
+        checkNearbyDevicesPermission,
     } = useBLE();
 
     const [hasBlePermissions, setHasBlePermissions] = useState(false);
-    const [isBluetoothEnabled, setIsBluetoothEnabled] = useState(false);
-    const [isLocationEnabled, setIsLocationEnabled] = useState(false);
+    const [permissionStatus, setPermissionStatus] = useState({
+        bluetooth: false,
+        location: false,
+        nearbyDevices: false,
+    });
+
+    // Verificação de permissões
+    const checkAllPermissions = useCallback(async () => {
+        if (!visible || attributeType !== 'rfid') return;
+
+        try {
+            const [bluetooth, location, nearbyDevices] = await Promise.all([
+                checkBluetoothEnabled(),
+                checkLocationEnabled(),
+                checkNearbyDevicesPermission(),
+            ]);
+
+            setPermissionStatus({
+                bluetooth,
+                location,
+                nearbyDevices,
+            });
+
+            const allEnabled = bluetooth && location && nearbyDevices;
+            setHasBlePermissions(allEnabled);
+
+            return allEnabled;
+        } catch (error) {
+            console.error("Erro ao verificar permissões:", error);
+            return false;
+        }
+    }, [
+        visible, 
+        attributeType, 
+        checkBluetoothEnabled, 
+        checkLocationEnabled,
+        checkNearbyDevicesPermission
+    ]);
+
+    // Verificação constante para tipo RFID
+    useEffect(() => {
+        if (!visible || attributeType !== 'rfid') {
+            console.log('🔕 EditValueModal: não é RFID ou está fechado');
+            return;
+        }
+
+        console.log('🔔 EditValueModal: RFID aberto, verificando permissões');
+        
+        // Verificação inicial
+        checkAllPermissions();
+
+        // Verificação a cada 2 segundos
+        const interval = setInterval(() => {
+            checkAllPermissions();
+        }, 2000);
+
+        return () => {
+            console.log('🧹 EditValueModal: limpando verificações');
+            clearInterval(interval);
+        };
+    }, [visible, attributeType, checkAllPermissions]);
 
     useEffect(() => {
         const val = value?.value || '';
@@ -1117,56 +1421,44 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
         }
     }, [value, attributeType]);
 
-    useEffect(() => {
-        if (visible && attributeType === 'rfid') {
-            checkServicesStatus();
-        }
-    }, [visible, attributeType]);
-
-    const checkServicesStatus = async () => {
-        try {
-            const [bluetooth, location] = await Promise.all([
-                checkBluetoothEnabled(),
-                checkLocationEnabled()
-            ]);
-            
-            setIsBluetoothEnabled(bluetooth);
-            setIsLocationEnabled(location);
-        } catch (error) {
-            console.error("Erro ao verificar status:", error);
-        }
-    };
-
     const handleOpenRfidScan = async () => {
-        if (!isBluetoothEnabled) {
+        // Verificar permissões atualizadas
+        const hasPermissions = await checkAllPermissions();
+
+        if (!permissionStatus.bluetooth) {
             Alert.alert(
                 "Bluetooth Desabilitado",
                 "Por favor, habilite o Bluetooth para usar a leitura RFID.",
-                [
-                    { 
-                        text: "OK",
-                        onPress: checkServicesStatus
-                    }
-                ]
+                [{ text: "OK" }]
             );
             return;
         }
 
-        if (!isLocationEnabled) {
+        if (!permissionStatus.location) {
             Alert.alert(
                 "Localização Desabilitada",
                 "Por favor, habilite a localização para usar a leitura RFID via Bluetooth.",
+                [{ text: "OK" }]
+            );
+            return;
+        }
+
+        if (!permissionStatus.nearbyDevices) {
+            Alert.alert(
+                "Permissão Necessária",
+                "Por favor, conceda a permissão de detecção de dispositivos próximos.",
                 [
+                    { text: "Cancelar", style: "cancel" },
                     { 
-                        text: "OK",
-                        onPress: checkServicesStatus
+                        text: "Configurações", 
+                        onPress: () => Linking.openSettings() 
                     }
                 ]
             );
             return;
         }
 
-        if (hasBlePermissions) {
+        if (hasPermissions) {
             setRfidScanModalVisible(true);
         } else {
             requestPermissions(isGranted => {
@@ -1183,22 +1475,6 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
             });
         }
     };
-
-    useEffect(() => {
-        const val = value?.value || '';
-        setNewValue(val);
-        
-        if (attributeType === 'date' && val) {
-            const parsedDate = new Date(val);
-            if (!isNaN(parsedDate.getTime())) {
-                setDateValue(parsedDate);
-                setTempDate(parsedDate);
-            }
-        } else {
-            setDateValue(new Date());
-            setTempDate(new Date());
-        }
-    }, [value, attributeType]);
 
     const validateValue = (val: string, type: string): boolean => {
         if (!val || val.trim() === '') {
@@ -1397,7 +1673,9 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
                 );
 
             case 'rfid':
-                const canUseRfid = isBluetoothEnabled && isLocationEnabled;
+                const canUseRfid = permissionStatus.bluetooth && 
+                                  permissionStatus.location && 
+                                  permissionStatus.nearbyDevices;
 
                 return (
                     <>
@@ -1416,10 +1694,10 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
                                     !canUseRfid && styles.scanButtonDisabled
                                 ]}
                                 onPress={handleOpenRfidScan}
-                                disabled={saving}
+                                disabled={saving || !canUseRfid}
                             >
                                 <MaterialCommunityIcons 
-                                    name={canUseRfid ? "radar" : "radio-off"} 
+                                    name={canUseRfid ? "radar" : "scanner-off"} 
                                     size={20} 
                                     color="white" 
                                 />
@@ -1431,29 +1709,43 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
                         <View style={styles.rfidStatusContainer}>
                             <View style={styles.rfidStatusItem}>
                                 <Feather 
-                                    name={isBluetoothEnabled ? "check-circle" : "x-circle"} 
+                                    name={permissionStatus.bluetooth ? "check-circle" : "x-circle"} 
                                     size={14} 
-                                    color={isBluetoothEnabled ? "#5ECC63" : "#FF6B6B"} 
+                                    color={permissionStatus.bluetooth ? "#5ECC63" : "#FF6B6B"} 
                                 />
                                 <Text style={[
                                     styles.rfidStatusText,
-                                    !isBluetoothEnabled && styles.rfidStatusTextError
+                                    !permissionStatus.bluetooth && styles.rfidStatusTextError
                                 ]}>
-                                    Bluetooth {isBluetoothEnabled ? 'ativo' : 'inativo'}
+                                    Bluetooth {permissionStatus.bluetooth ? 'ativo' : 'inativo'}
                                 </Text>
                             </View>
                             
                             <View style={styles.rfidStatusItem}>
                                 <Feather 
-                                    name={isLocationEnabled ? "check-circle" : "x-circle"} 
+                                    name={permissionStatus.location ? "check-circle" : "x-circle"} 
                                     size={14} 
-                                    color={isLocationEnabled ? "#5ECC63" : "#FF6B6B"} 
+                                    color={permissionStatus.location ? "#5ECC63" : "#FF6B6B"} 
                                 />
                                 <Text style={[
                                     styles.rfidStatusText,
-                                    !isLocationEnabled && styles.rfidStatusTextError
+                                    !permissionStatus.location && styles.rfidStatusTextError
                                 ]}>
-                                    Localização {isLocationEnabled ? 'ativa' : 'inativa'}
+                                    Localização {permissionStatus.location ? 'ativa' : 'inativa'}
+                                </Text>
+                            </View>
+
+                            <View style={styles.rfidStatusItem}>
+                                <Feather 
+                                    name={permissionStatus.nearbyDevices ? "check-circle" : "x-circle"} 
+                                    size={14} 
+                                    color={permissionStatus.nearbyDevices ? "#5ECC63" : "#FF6B6B"} 
+                                />
+                                <Text style={[
+                                    styles.rfidStatusText,
+                                    !permissionStatus.nearbyDevices && styles.rfidStatusTextError
+                                ]}>
+                                    Dispositivos {permissionStatus.nearbyDevices ? 'permitido' : 'bloqueado'}
                                 </Text>
                             </View>
                         </View>
@@ -1462,11 +1754,7 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
                             <View style={styles.rfidWarning}>
                                 <Feather name="alert-triangle" size={16} color="#FF9800" />
                                 <Text style={styles.rfidWarningText}>
-                                    {!isBluetoothEnabled && !isLocationEnabled
-                                        ? 'Habilite o Bluetooth e a Localização para escanear'
-                                        : !isBluetoothEnabled
-                                        ? 'Habilite o Bluetooth para escanear'
-                                        : 'Habilite a Localização para escanear'}
+                                    Habilite todas as permissões para escanear tags RFID
                                 </Text>
                             </View>
                         )}
@@ -3005,5 +3293,55 @@ const styles = StyleSheet.create({
         color: '#F44336',
         fontSize: 16,
         fontWeight: '600',
+    },
+    permissionWarningCard: {
+        backgroundColor: '#FFF3E0',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        borderLeftWidth: 4,
+        borderLeftColor: '#FF9800',
+    },
+    permissionWarningHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 12,
+    },
+    permissionWarningTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#E65100',
+    },
+    permissionStatusList: {
+        gap: 6,
+        marginBottom: 12,
+    },
+    permissionWarningText: {
+        fontSize: 14,
+        color: '#E65100',
+        lineHeight: 20,
+    },
+    permissionWarningButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#E3F2FD',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        gap: 6,
+    },
+    permissionWarningButtonText: {
+        fontSize: 14,
+        color: '#2196F3',
+        fontWeight: '600',
+    },
+    buttonDisabled: {
+        backgroundColor: '#D0D0D0',
+        opacity: 0.6,
+    },
+    buttonTextDisabled: {
+        color: '#999',
     },
 });

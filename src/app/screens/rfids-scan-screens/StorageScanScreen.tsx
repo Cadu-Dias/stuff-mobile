@@ -12,7 +12,6 @@ import {
   Platform,
   TouchableOpacity,
   Alert,
-  Easing,
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
@@ -90,7 +89,7 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
   const navigator = useNavigation<RootStackNavigationProp>();
   const isFocused = useIsFocused();
 
-  const { connectToDevice, disconnectFromDevice, connectedDevice, scannedRfids } = useBLE();
+  const { connectToDevice, disconnectFromDevice, connectedDevice, scannedRfids, checkBluetoothEnabled } = useBLE();
 
   const [isConnectionFailed, setIsConnectionFailed] = useState(false);
   const [countdown, setCountdown] = useState(5);
@@ -103,6 +102,7 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const finishingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const finishingCountdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const bluetoothCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const hasTriedConnection = useRef(false);
 
   const [rfidStatusList, setRfidStatusList] = useState<RfidStatusItem[]>(() => {
@@ -121,28 +121,78 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
   const totalCount = rfidStatusList.length;
   const progress = totalCount > 0 ? (scannedCount / totalCount) * 100 : 0;
 
-  const circleScale = useRef(new Animated.Value(1)).current;
-  const progressAnim = useRef(new Animated.Value(0)).current;
-  const finishAnim = useRef(new Animated.Value(0)).current;
-  const waveAnims = useRef([new Animated.Value(0), new Animated.Value(0), new Animated.Value(0)]).current;
+  // Animação simplificada - apenas pulso suave
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const rotateAnim = useRef(new Animated.Value(0)).current;
 
   const cleanupTimers = useCallback(() => {
     if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
     if (finishingTimeoutRef.current) clearTimeout(finishingTimeoutRef.current);
     if (finishingCountdownIntervalRef.current) clearInterval(finishingCountdownIntervalRef.current);
+    if (bluetoothCheckIntervalRef.current) clearInterval(bluetoothCheckIntervalRef.current);
   }, []);
+
+  // Verificação constante do Bluetooth
+  useEffect(() => {
+    if (!isFocused || isFinishing) return;
+
+    const checkBluetooth = async () => {
+      try {
+        const isBluetoothOn = await checkBluetoothEnabled();
+        
+        if (!isBluetoothOn) {
+          console.log('⚠️ Bluetooth desativado detectado durante scan');
+          cleanupTimers();
+          await disconnectFromDevice();
+          
+          Alert.alert(
+            'Bluetooth Desativado',
+            'O Bluetooth foi desativado. Você será redirecionado para a tela de scan.',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  navigator.navigate('MainTabs', { screen: 'Scan', params: undefined });
+                }
+              }
+            ],
+            { cancelable: false }
+          );
+        }
+      } catch (error) {
+        console.error('Erro ao verificar status do Bluetooth:', error);
+      }
+    };
+
+    checkBluetooth();
+    bluetoothCheckIntervalRef.current = setInterval(checkBluetooth, 2000);
+
+    return () => {
+      if (bluetoothCheckIntervalRef.current) {
+        clearInterval(bluetoothCheckIntervalRef.current);
+      }
+    };
+  }, [isFocused, isFinishing, checkBluetoothEnabled, cleanupTimers, disconnectFromDevice, navigator]);
 
   useEffect(() => {
     if (!isFocused) return;
     const tryToConnect = async () => {
       if (hasTriedConnection.current || isFinishing || connectedDevice) return;
       hasTriedConnection.current = true;
-      try { await connectToDevice(deviceAddress); } catch (error) { setIsConnectionFailed(true); hasTriedConnection.current = false; }
+      try { 
+        await connectToDevice(deviceAddress); 
+      } catch (error) { 
+        setIsConnectionFailed(true); 
+        hasTriedConnection.current = false; 
+      }
     };
     tryToConnect();
     return () => {
       cleanupTimers();
-      if (!isFinishing && hasTriedConnection.current) { disconnectFromDevice(); hasTriedConnection.current = false; }
+      if (!isFinishing && hasTriedConnection.current) { 
+        disconnectFromDevice(); 
+        hasTriedConnection.current = false; 
+      }
     };
   }, [isFocused]);
 
@@ -169,58 +219,45 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
     return () => { if (durationIntervalRef.current) clearInterval(durationIntervalRef.current); };
   }, [connectedDevice, isFinishing]);
 
+  // Animação simplificada de pulso
   useEffect(() => {
     if (!connectedDevice || isFinishing) {
-      circleScale.stopAnimation();
+      pulseAnim.stopAnimation();
+      rotateAnim.stopAnimation();
       return;
     }
-    const pulseAnimation = Animated.loop(
+
+    // Animação de pulso suave
+    const pulse = Animated.loop(
       Animated.sequence([
-        Animated.timing(circleScale, { toValue: 1.05, duration: 1200, useNativeDriver: true }),
-        Animated.timing(circleScale, { toValue: 1, duration: 1200, useNativeDriver: true }),
+        Animated.timing(pulseAnim, {
+          toValue: 1.1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
       ])
     );
-    pulseAnimation.start();
-    return () => pulseAnimation.stop();
-  }, [connectedDevice, isFinishing]);
 
-  useEffect(() => {
-    if (!connectedDevice || isFinishing) {
-      waveAnims.forEach(anim => {
-        anim.stopAnimation();
-        anim.setValue(0);
-      });
-      return;
-    }
-
-    const waveDuration = 2500;
-    const staggerDelay = 800;
-
-    const animations = waveAnims.map((anim) =>
-      Animated.loop(
-        Animated.timing(anim, {
-          toValue: 1,
-          duration: waveDuration,
-          useNativeDriver: true,
-          easing: Easing.out(Easing.ease),
-        })
-      )
+    // Animação de rotação do ícone
+    const rotate = Animated.loop(
+      Animated.timing(rotateAnim, {
+        toValue: 1,
+        duration: 3000,
+        useNativeDriver: true,
+      })
     );
 
-    const timeouts: NodeJS.Timeout[] = [];
-
-    animations.forEach((animation, index) => {
-      timeouts.push(
-        setTimeout(() => {
-          waveAnims[index].setValue(0);
-          animation.start();
-        }, index * staggerDelay)
-      );
-    });
+    pulse.start();
+    rotate.start();
 
     return () => {
-      timeouts.forEach(clearTimeout);
-      animations.forEach(animation => animation.stop());
+      pulse.stop();
+      rotate.stop();
     };
   }, [connectedDevice, isFinishing]);
 
@@ -285,7 +322,7 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
         <View style={styles.main}>
           <View style={styles.errorContainer}>
             <View style={styles.errorIconContainer}>
-                <MaterialCommunityIcons name="bluetooth-off" size={64} color="#F44336" />
+              <MaterialCommunityIcons name="bluetooth-off" size={64} color="#F44336" />
             </View>
             <Text style={styles.errorTitle}>Falha na Conexão</Text>
             <Text style={styles.errorMessage}>Não foi possível conectar ao dispositivo. Verifique se ele está ligado e próximo.</Text>
@@ -301,48 +338,66 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
 
   const isConnected = connectedDevice?.address === deviceAddress;
 
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg']
+  });
+
   const renderScanner = () => (
     <View style={styles.scannerSection}>
       {isFinishing ? (
         <View style={styles.finishingContainer}>
           <Animated.View style={[styles.finishingCircle]}>
             <MaterialCommunityIcons name="check-circle" size={64} color="white" />
-            <Text style={styles.finishingText}>Scan Completo!</Text><Text style={styles.finishingSubtext}>Finalizando em {finishingCountdown}s
-            </Text>
+            <Text style={styles.finishingText}>Scan Completo!</Text>
+            <Text style={styles.finishingSubtext}>Finalizando em {finishingCountdown}s</Text>
           </Animated.View>
-          <View style={styles.finishingInfo}><ActivityIndicator size="small" color="#4CAF50" />
+          <View style={styles.finishingInfo}>
+            <ActivityIndicator size="small" color="#4CAF50" />
             <Text style={styles.finishingInfoText}>Desconectando dispositivo e preparando resultados...</Text>
           </View>
         </View>
       ) : (
-        <><View style={styles.scannerContainer}>
-          {isConnected && waveAnims.map((anim, index) => (
-            <Animated.View
-              key={index}
-              style={[
-                styles.wave,
-                {
-                  transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 4] }) }],
-                  opacity: anim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.3, 0.1, 0] }),
-                },
-              ]}
-            />
-          ))}
-          <Animated.View style={[styles.scannerCircle, isConnected && styles.scannerCircleConnected, isConnected && { transform: [{ scale: circleScale }] }]}>
-            {!isConnected ? (
-              <>
-                <ActivityIndicator size="large" color="white" />
-                <Text style={styles.scannerStatusText}>Conectando...</Text>
-              </>
-            ) : (
-              <>
-                <MaterialCommunityIcons name="radar" size={48} color="white" />
-                <Text style={styles.scannerStatusText}>Escaneando</Text>
-                <Text style={styles.scannerDeviceName}>{connectedDevice?.name || 'Leitor RFID'}</Text>
-              </>
+        <>
+          <View style={styles.scannerContainer}>
+            {/* Círculo externo pulsante - animação simplificada */}
+            {isConnected && (
+              <Animated.View
+                style={[
+                  styles.pulseCircle,
+                  {
+                    transform: [{ scale: pulseAnim }],
+                    opacity: pulseAnim.interpolate({
+                      inputRange: [1, 1.1],
+                      outputRange: [0.3, 0.1]
+                    })
+                  }
+                ]}
+              />
             )}
-          </Animated.View>
-        </View>
+
+            {/* Círculo principal */}
+            <View style={[
+              styles.scannerCircle,
+              isConnected && styles.scannerCircleConnected
+            ]}>
+              {!isConnected ? (
+                <>
+                  <ActivityIndicator size="large" color="white" />
+                  <Text style={styles.scannerStatusText}>Conectando...</Text>
+                </>
+              ) : (
+                <>
+                  <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                    <MaterialCommunityIcons name="radar" size={48} color="white" />
+                  </Animated.View>
+                  <Text style={styles.scannerStatusText}>Escaneando</Text>
+                  <Text style={styles.scannerDeviceName}>{connectedDevice?.name || 'Leitor RFID'}</Text>
+                </>
+              )}
+            </View>
+          </View>
+
           {isConnected && (
             <View style={styles.progressSection}>
               <View style={styles.progressHeader}>
@@ -350,14 +405,21 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
                 <Text style={styles.progressPercentage}>{Math.round(progress)}%</Text>
               </View>
               <View style={styles.progressBarContainer}>
-                <Animated.View style={[styles.progressBar, { width: `${progress}%`, backgroundColor: progress === 100 ? '#4CAF50' : '#F4A64E' }]} />
+                <Animated.View style={[
+                  styles.progressBar,
+                  { 
+                    width: `${progress}%`,
+                    backgroundColor: progress === 100 ? '#4CAF50' : '#F4A64E'
+                  }
+                ]} />
               </View>
               <View style={styles.progressStats}>
                 <View style={styles.progressStat}>
                   <Feather name="check-circle" size={14} color="#4CAF50" />
                   <Text style={styles.progressStatText}>{scannedCount} encontrados</Text>
                 </View>
-                <View style={styles.progressStat}><Feather name="circle" size={14} color="#FF9800" />
+                <View style={styles.progressStat}>
+                  <Feather name="circle" size={14} color="#FF9800" />
                   <Text style={styles.progressStatText}>{totalCount - scannedCount} pendentes</Text>
                 </View>
               </View>
@@ -378,8 +440,14 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
           </View>
           <View style={styles.headerRight}>
             <View style={[styles.statusBadge, isFinishing && styles.statusBadgeFinishing]}>
-              <View style={[styles.statusDot, isConnected && !isFinishing && styles.statusDotConnected, isFinishing && styles.statusDotFinishing]} />
-              <Text style={styles.statusText}>{isFinishing ? 'Finalizando' : isConnected ? 'Conectado' : 'Conectando...'}</Text>
+              <View style={[
+                styles.statusDot,
+                isConnected && !isFinishing && styles.statusDotConnected,
+                isFinishing && styles.statusDotFinishing
+              ]} />
+              <Text style={styles.statusText}>
+                {isFinishing ? 'Finalizando' : isConnected ? 'Conectado' : 'Conectando...'}
+              </Text>
             </View>
             {isConnected && !isFinishing && (
               <View style={styles.timerBadge}>
@@ -412,17 +480,25 @@ const StorageScanScreen = ({ route }: StorageScanScreenProps) => {
           ItemSeparatorComponent={() => <View style={styles.itemSeparator} />}
           ListHeaderComponent={ListHeaderComponent}
           ListFooterComponent={() => 
-            <View style={styles.actionsSection}>{!isFinishing && (
-              <>
-                <TouchableOpacity style={styles.interruptButton} onPress={handleInterruptScan} disabled={!isScanning}>
-                  <Feather name="stop-circle" size={20} color="#F44336" />
-                  <Text style={styles.interruptButtonText}>Parar Verificação</Text>
-                </TouchableOpacity>
-                <View style={styles.helpCard}><Feather name="info" size={16} color="#2196F3" />
-                  <Text style={styles.helpText}>Aproxime as tags RFID do leitor para detectá-las automaticamente</Text>
-                </View>
-              </>
-            )}
+            <View style={styles.actionsSection}>
+              {!isFinishing && (
+                <>
+                  <TouchableOpacity 
+                    style={styles.interruptButton} 
+                    onPress={handleInterruptScan} 
+                    disabled={!isScanning}
+                  >
+                    <Feather name="stop-circle" size={20} color="#F44336" />
+                    <Text style={styles.interruptButtonText}>Parar Verificação</Text>
+                  </TouchableOpacity>
+                  <View style={styles.helpCard}>
+                    <Feather name="info" size={16} color="#2196F3" />
+                    <Text style={styles.helpText}>
+                      Aproxime as tags RFID do leitor para detectá-las automaticamente
+                    </Text>
+                  </View>
+                </>
+              )}
             </View>
           }
           initialNumToRender={10}
@@ -451,68 +527,258 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 26, fontWeight: 'bold', color: '#333', marginBottom: 4 },
   headerSubtitle: { fontSize: 15, color: '#666' },
   headerRight: { alignItems: 'flex-end', gap: 8 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, gap: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  statusBadge: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'white', 
+    paddingHorizontal: 12, 
+    paddingVertical: 6, 
+    borderRadius: 20, 
+    gap: 6, 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.1, 
+    shadowRadius: 4, 
+    elevation: 3 
+  },
   statusBadgeFinishing: { backgroundColor: '#E8F5E9' },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#999' },
   statusDotConnected: { backgroundColor: '#4CAF50' },
   statusDotFinishing: { backgroundColor: '#4CAF50' },
   statusText: { fontSize: 13, fontWeight: '600', color: '#333' },
-  timerBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'white', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16, gap: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 2, elevation: 2 },
-  timerText: { fontSize: 13, fontWeight: '600', color: '#333', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  timerBadge: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'white', 
+    paddingHorizontal: 10, 
+    paddingVertical: 5, 
+    borderRadius: 16, 
+    gap: 4, 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 1 }, 
+    shadowOpacity: 0.08, 
+    shadowRadius: 2, 
+    elevation: 2 
+  },
+  timerText: { 
+    fontSize: 13, 
+    fontWeight: '600', 
+    color: '#333', 
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' 
+  },
   scannerSection: { alignItems: 'center', paddingHorizontal: 20, paddingBottom: 24 },
-  scannerContainer: { marginBottom: 24, position: 'relative', alignItems: 'center', justifyContent: 'center', width: 320, height: 320 },
-  scannerCircle: { width: 180, height: 180, borderRadius: 90, backgroundColor: '#999', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 10 },
-  scannerCircleConnected: { backgroundColor: '#F4A64E', shadowColor: '#F4A64E', shadowOpacity: 0.5 },
-  wave: { position: 'absolute', width: 180, height: 180, borderRadius: 90, backgroundColor: '#F4A64E' },
+  scannerContainer: { 
+    marginBottom: 24, 
+    position: 'relative', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    width: 240, 
+    height: 240 
+  },
+  scannerCircle: { 
+    width: 180, 
+    height: 180, 
+    borderRadius: 90, 
+    backgroundColor: '#999', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 8 }, 
+    shadowOpacity: 0.2, 
+    shadowRadius: 12, 
+    elevation: 10 
+  },
+  scannerCircleConnected: { 
+    backgroundColor: '#F4A64E', 
+    shadowColor: '#F4A64E', 
+    shadowOpacity: 0.5 
+  },
+  pulseCircle: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: '#F4A64E',
+    borderWidth: 3,
+    borderColor: '#F4A64E',
+  },
   scannerStatusText: { fontSize: 16, fontWeight: 'bold', color: 'white', marginTop: 12 },
   scannerDeviceName: { fontSize: 12, color: 'white', opacity: 0.9, marginTop: 4 },
   finishingContainer: { alignItems: 'center', paddingVertical: 20 },
-  finishingCircle: { width: 180, height: 180, borderRadius: 90, backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', shadowColor: '#4CAF50', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 12, elevation: 10, marginBottom: 24 },
+  finishingCircle: { 
+    width: 180, 
+    height: 180, 
+    borderRadius: 90, 
+    backgroundColor: '#4CAF50', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    shadowColor: '#4CAF50', 
+    shadowOffset: { width: 0, height: 8 }, 
+    shadowOpacity: 0.4, 
+    shadowRadius: 12, 
+    elevation: 10, 
+    marginBottom: 24 
+  },
   finishingText: { fontSize: 18, fontWeight: 'bold', color: 'white', marginTop: 12 },
   finishingSubtext: { fontSize: 14, color: 'white', opacity: 0.9, marginTop: 4 },
-  finishingInfo: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'white', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  finishingInfo: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 12, 
+    backgroundColor: 'white', 
+    paddingHorizontal: 16, 
+    paddingVertical: 12, 
+    borderRadius: 12, 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.1, 
+    shadowRadius: 4, 
+    elevation: 3 
+  },
   finishingInfoText: { fontSize: 13, color: '#666', flex: 1 },
   progressSection: { width: '100%' },
-  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  progressHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 10 
+  },
   progressText: { fontSize: 14, fontWeight: '600', color: '#333' },
   progressPercentage: { fontSize: 18, fontWeight: 'bold', color: '#F4A64E' },
-  progressBarContainer: { width: '100%', height: 8, backgroundColor: '#E0E0E0', borderRadius: 4, overflow: 'hidden', marginBottom: 10 },
+  progressBarContainer: { 
+    width: '100%', 
+    height: 8, 
+    backgroundColor: '#E0E0E0', 
+    borderRadius: 4, 
+    overflow: 'hidden', 
+    marginBottom: 10 
+  },
   progressBar: { height: '100%', borderRadius: 4 },
   progressStats: { flexDirection: 'row', justifyContent: 'space-around' },
   progressStat: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   progressStatText: { fontSize: 12, color: '#666' },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingBottom: 16 },
+  sectionHeader: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 8, 
+    paddingHorizontal: 20, 
+    paddingBottom: 16 
+  },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   itemSeparator: { height: 10 },
-  rfidCard: { backgroundColor: 'white', borderRadius: 12, padding: 16, marginHorizontal: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 3, borderLeftWidth: 4, borderLeftColor: '#E0E0E0' },
+  rfidCard: { 
+    backgroundColor: 'white', 
+    borderRadius: 12, 
+    padding: 16, 
+    marginHorizontal: 20, 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.08, 
+    shadowRadius: 4, 
+    elevation: 3, 
+    borderLeftWidth: 4, 
+    borderLeftColor: '#E0E0E0' 
+  },
   rfidCardScanned: { borderLeftColor: '#4CAF50', backgroundColor: '#F1F8E9' },
-  rfidCardContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rfidLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12, overflow: 'hidden' },
-  rfidStatusIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center' },
+  rfidCardContent: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center' 
+  },
+  rfidLeft: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    flex: 1, 
+    gap: 12, 
+    overflow: 'hidden' 
+  },
+  rfidStatusIcon: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    backgroundColor: '#F5F5F5', 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
   rfidStatusIconScanned: { backgroundColor: '#4CAF50' },
   rfidInfo: { flex: 1 },
   rfidName: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 6 },
   rfidNameScanned: { color: '#2E7D32' },
   rfidTagContainer: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  rfidTag: { fontSize: 11, color: '#999', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  rfidTag: { 
+    fontSize: 11, 
+    color: '#999', 
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' 
+  },
   rfidRight: { alignItems: 'flex-end', gap: 8 },
   rfidIndex: { backgroundColor: '#F0F0F0', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   rfidIndexText: { fontSize: 10, fontWeight: '600', color: '#666' },
-  scannedBadge: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center' },
+  scannedBadge: { 
+    width: 24, 
+    height: 24, 
+    borderRadius: 12, 
+    backgroundColor: '#4CAF50', 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
   scannedBadgeText: { fontSize: 14, color: 'white', fontWeight: 'bold' },
   actionsSection: { paddingHorizontal: 20, paddingTop: 20, gap: 12 },
-  interruptButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 12, backgroundColor: 'white', borderWidth: 2, borderColor: '#F44336', gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  interruptButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    paddingVertical: 16, 
+    borderRadius: 12, 
+    backgroundColor: 'white', 
+    borderWidth: 2, 
+    borderColor: '#F44336', 
+    gap: 8, 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.1, 
+    shadowRadius: 4, 
+    elevation: 3 
+  },
   interruptButtonText: { color: '#F44336', fontSize: 16, fontWeight: '600' },
-  helpCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E3F2FD', padding: 12, borderRadius: 8, gap: 8 },
+  helpCard: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#E3F2FD', 
+    padding: 12, 
+    borderRadius: 8, 
+    gap: 8 
+  },
   helpText: { flex: 1, fontSize: 13, color: '#1976D2', lineHeight: 18 },
   emptyContainer: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 20 },
   emptyTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', marginTop: 16, marginBottom: 8 },
   emptyText: { fontSize: 15, color: '#666', textAlign: 'center', lineHeight: 22 },
   errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  errorIconContainer: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#FFEBEE', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
+  errorIconContainer: { 
+    width: 100, 
+    height: 100, 
+    borderRadius: 50, 
+    backgroundColor: '#FFEBEE', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginBottom: 24 
+  },
   errorTitle: { fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 12, textAlign: 'center' },
-  errorMessage: { fontSize: 16, color: '#666', textAlign: 'center', lineHeight: 24, marginBottom: 24 },
-  countdownBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF3E0', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, gap: 8 },
+  errorMessage: { 
+    fontSize: 16, 
+    color: '#666', 
+    textAlign: 'center', 
+    lineHeight: 24, 
+    marginBottom: 24 
+  },
+  countdownBadge: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#FFF3E0', 
+    paddingHorizontal: 16, 
+    paddingVertical: 10, 
+    borderRadius: 20, 
+    gap: 8 
+  },
   countdownText: { fontSize: 14, color: '#F57C00', fontWeight: '600' },
 });
 

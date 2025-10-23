@@ -4,7 +4,7 @@ import RNBluetoothClassic, {
   BluetoothDevice,
   BluetoothDeviceReadEvent,
 } from "react-native-bluetooth-classic";
-import { PERMISSIONS, requestMultiple, RESULTS } from "react-native-permissions";
+import { check, PERMISSIONS, requestMultiple, RESULTS } from "react-native-permissions";
 import DeviceInfo from "react-native-device-info";
 import Geolocation from "@react-native-community/geolocation"
 
@@ -14,6 +14,7 @@ interface BluetoothLowEnergyApi {
   requestPermissions(cb: VoidCallback): Promise<void>;
   checkBluetoothEnabled(): Promise<boolean>;
   checkLocationEnabled(): Promise<boolean>;
+  checkNearbyDevicesPermission(): Promise<boolean>;
   testConnection(deviceAddress: string): Promise<boolean>;
   scanForPeripherals(): void;
   cancelDiscovery(): void;
@@ -71,6 +72,31 @@ function useBLE(): BluetoothLowEnergyApi {
       );
     });
   }, []);
+
+  const checkNearbyDevicesPermission = useCallback(async (): Promise<boolean> => {
+  if (Platform.OS !== "android") {
+    return true; 
+  }
+
+  try {
+    const apiLevel = await DeviceInfo.getApiLevel();
+    
+    if (apiLevel >= 31) {
+      const scanPermission = await check(PERMISSIONS.ANDROID.BLUETOOTH_SCAN);
+      const connectPermission = await check(PERMISSIONS.ANDROID.BLUETOOTH_CONNECT);
+      
+      return (
+        scanPermission === RESULTS.GRANTED && 
+        connectPermission === RESULTS.GRANTED
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Erro ao verificar permissão de dispositivos próximos:', error);
+    return false;
+  }
+}, []);
 
   const requestPermissions = useCallback(async (cb: VoidCallback) => {
     if (Platform.OS !== "android") {
@@ -372,6 +398,7 @@ function useBLE(): BluetoothLowEnergyApi {
     cancelDiscovery,
     requestPermissions,
     checkBluetoothEnabled,
+    checkNearbyDevicesPermission,
     checkLocationEnabled,
     connectToDevice,
     allDevices,
