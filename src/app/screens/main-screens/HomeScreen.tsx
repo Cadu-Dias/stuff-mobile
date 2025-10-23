@@ -198,11 +198,11 @@ const HomeScreen = () => {
                 onPress={() => navigation.navigate('QrCodeScan')}
               />
               <QuickActionCard
-                title="Criar Organização"
-                description="Adicione uma nova organização"
+                title="Criar Ativo"
+                description="Adicione uma novo Ativo"
                 icon="plus-circle"
                 color="#FF9800"
-                onPress={() => navigation.navigate('Organizations' as never)}
+                onPress={() => navigation.navigate('MainTabs', { screen: "Organization", params: { tab: "assets", createAsset: true }})}
               />
             </View>
           </View>

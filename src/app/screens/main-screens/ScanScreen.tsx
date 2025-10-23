@@ -308,7 +308,7 @@ const ScanScreen = () => {
 
     const handleHistoryPress = () => {
         navigation.navigate('MainTabs', {
-            screen: 'Organizations',
+            screen: 'Organization',
             params: { tab: 'reports' }
         })
     };
