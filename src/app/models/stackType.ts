@@ -5,6 +5,7 @@ import { Report } from "./reports.model";
 
 export type RootStackParamList = {
     Login: undefined;
+    ForgotPassword: undefined;
     MainTabs: { screen: string, params: any } | undefined;
     OrganizationsScreen: undefined;
     AssetDetails: { organizationId: string, assetId: string };

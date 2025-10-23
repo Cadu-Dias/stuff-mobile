@@ -21,7 +21,7 @@ const TabRoutes = () => {
                 }}
             />
             <Tab.Screen 
-                name='Organizations'
+                name='Organization'
                 component={SCREENS.OrganizationDetailScreen}
                 options={{
                     tabBarIcon: ({ color, size }) => <Feather name='briefcase' color={color} size={size} />,

@@ -22,6 +22,12 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
         headerShown: false 
       },
     },
+    ForgotPassword: {
+      screen: SCREENS.ForgotPasswordScreen,
+      options: {
+        headerShown: false
+      }
+    },
     MainTabs: {
       screen: TabRoutes,
     },

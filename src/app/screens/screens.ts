@@ -1,7 +1,7 @@
 import HomeScreen from "./main-screens/HomeScreen";
 import DeviceDiscovery from "./rfids-scan-screens/DeviceDiscoveryScreen";
 import StorageScanScreen from "./rfids-scan-screens/StorageScanScreen";
-import LoginScreen from "./main-screens/LoginScreen";
+import LoginScreen from "./auth-screens/LoginScreen";
 import ResultsScreen from "./rfids-scan-screens/ResultsScreen";
 import ProfileScreen from "./main-screens/ProfileScreen"
 import OrganizationsScreen from "./main-screens/OrganizationSelectionScreen";
@@ -12,13 +12,14 @@ import AssetDetailScreen from "./assets-screens/AssetDetailScreen";
 import RFIDScanManagerScreen from "./rfids-scan-screens/RfidScanManagerScreen";
 import AssetSelectionScreen from "./assets-screens/AssetSelectionScreen";
 import ReportDetailScreen from "./reports/ReportDetailScreen";
+import ForgotPasswordScreen from "./auth-screens/ForgotPasswordScreen";
 
 const SCREENS = { 
     HomeScreen, StorageScanScreen, DeviceDiscovery, 
     LoginScreen, ResultsScreen, ProfileScreen, OrganizationsScreen,
     OrganizationDetailScreen, ScanScreen, QRCodeReaderScreen, 
     AssetDetailScreen, RFIDScanManagerScreen, 
-    AssetSelectionScreen, ReportDetailScreen
+    AssetSelectionScreen, ReportDetailScreen, ForgotPasswordScreen
 }
 
 export default SCREENS

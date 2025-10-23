@@ -63,7 +63,7 @@ const LoginScreen = () => {
             setIsLogging(false);
             navigator.navigate('OrganizationsScreen'); 
         } catch (error: any) {
-            
+            console.log(error)
             setLoginError(error["message"]);
             setIsLogging(false);
         }
@@ -84,6 +84,7 @@ const LoginScreen = () => {
         setPassword(text);
         setLoginError('');
     };
+    
 
     const isButtonDisabled = !email || !password || !!emailError || isLogging;
 
@@ -215,9 +216,9 @@ const LoginScreen = () => {
                             )}
                         </TouchableOpacity>
 
-                        {/* Esqueceu a senha */}
                         <TouchableOpacity 
                             style={styles.forgotPasswordButton}
+                            onPress={() => navigator.navigate('ForgotPassword')}
                             disabled={isLogging}
                         >
                             <Text style={styles.forgotPasswordText}>Esqueceu sua senha?</Text>
