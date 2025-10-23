@@ -583,7 +583,9 @@ const styles = StyleSheet.create({
   requirementsCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF3E0',
+    borderColor: '#FF9800',
+    borderWidth: 1,
+    backgroundColor: 'white',
     padding: 12,
     borderRadius: 8,
     marginTop: 12,

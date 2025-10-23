@@ -31,7 +31,6 @@ const themeColors = {
   placeholder: '#999999',
 };
 
-// Modal de Edição de Perfil (estilo OrganizationDetailScreen)
 const EditProfileModal = ({ 
   visible, 
   onClose, 
@@ -149,159 +148,6 @@ const EditProfileModal = ({
               Essas informações serão exibidas em seu perfil e visíveis para outros membros.
             </Text>
           </View>
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
-  );
-};
-
-// Modal de Segurança (Trocar Senha)
-const SecurityModal = ({ 
-  visible, 
-  onClose 
-}: {
-  visible: boolean;
-  onClose: () => void;
-}) => {
-  const [passwords, setPasswords] = useState({
-    current: '',
-    new: '',
-    confirm: '',
-  });
-  const [showPasswords, setShowPasswords] = useState({
-    current: false,
-    new: false,
-    confirm: false,
-  });
-  const [saving, setSaving] = useState(false);
-
-  const handleChangePassword = async () => {
-    if (!passwords.current || !passwords.new || !passwords.confirm) {
-      Alert.alert("Erro", "Todos os campos são obrigatórios!");
-      return;
-    }
-
-    if (passwords.new !== passwords.confirm) {
-      Alert.alert("Erro", "As senhas não coincidem!");
-      return;
-    }
-
-    if (passwords.new.length < 6) {
-      Alert.alert("Erro", "A senha deve ter no mínimo 6 caracteres!");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      // Implementar chamada ao serviço
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      Alert.alert("Sucesso", "Senha alterada com sucesso!");
-      setPasswords({ current: '', new: '', confirm: '' });
-      onClose();
-    } catch (error) {
-      Alert.alert("Erro", "Não foi possível alterar a senha");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const PasswordInput = ({ 
-    label, 
-    value, 
-    field, 
-    placeholder 
-  }: { 
-    label: string; 
-    value: string; 
-    field: 'current' | 'new' | 'confirm'; 
-    placeholder: string;
-  }) => (
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>
-        <Feather name="lock" size={14} color="#F4A64E" /> {label}
-      </Text>
-      <View style={styles.passwordInputContainer}>
-        <TextInput
-          style={styles.passwordInput}
-          value={value}
-          onChangeText={(text) => setPasswords({ ...passwords, [field]: text })}
-          placeholder={placeholder}
-          placeholderTextColor="#999"
-          secureTextEntry={!showPasswords[field]}
-          editable={!saving}
-        />
-        <TouchableOpacity
-          style={styles.passwordToggle}
-          onPress={() => setShowPasswords({ ...showPasswords, [field]: !showPasswords[field] })}
-        >
-          <Feather 
-            name={showPasswords[field] ? "eye-off" : "eye"} 
-            size={20} 
-            color="#666" 
-          />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <SafeAreaView style={styles.modalContainer}>
-        <View style={styles.modalHeader}>
-          <TouchableOpacity onPress={onClose} disabled={saving}>
-            <Feather name="x" size={24} color="#333" />
-          </TouchableOpacity>
-          <Text style={styles.modalTitle}>Segurança</Text>
-          <View style={{ width: 24 }} />
-        </View>
-
-        <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.formSection}>
-            <Text style={styles.formSectionTitle}>Alterar Senha</Text>
-            
-            <PasswordInput
-              label="Senha Atual *"
-              value={passwords.current}
-              field="current"
-              placeholder="Digite sua senha atual"
-            />
-
-            <PasswordInput
-              label="Nova Senha *"
-              value={passwords.new}
-              field="new"
-              placeholder="Digite a nova senha"
-            />
-
-            <PasswordInput
-              label="Confirmar Senha *"
-              value={passwords.confirm}
-              field="confirm"
-              placeholder="Confirme a nova senha"
-            />
-          </View>
-
-          <View style={styles.helpText}>
-            <Feather name="shield" size={16} color="#FF9800" />
-            <Text style={styles.helpTextContent}>
-              Use uma senha forte com pelo menos 6 caracteres, incluindo letras e números.
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={[styles.primaryButton, saving && styles.saveButtonDisabled]}
-            onPress={handleChangePassword}
-            disabled={saving}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <>
-                <Feather name="check" size={20} color="white" />
-                <Text style={styles.primaryButtonText}>Alterar Senha</Text>
-              </>
-            )}
-          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -565,9 +411,7 @@ export default function Profile() {
   const [userData, setUserData] = useState<{ firstName: string; lastName: string; username: string } | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // Estados dos modais
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [securityModalVisible, setSecurityModalVisible] = useState(false);
   const [notificationsModalVisible, setNotificationsModalVisible] = useState(false);
   const [helpModalVisible, setHelpModalVisible] = useState(false);
 
@@ -706,24 +550,10 @@ export default function Profile() {
       <View style={styles.accountOptions}>
         <TouchableOpacity 
           style={styles.optionItem}
-          onPress={() => setSecurityModalVisible(true)}
-        >
-          <View style={styles.optionIcon}>
-            <Feather name="shield" size={20} color="#FF9800" />
-          </View>
-          <View style={styles.optionContent}>
-            <Text style={styles.optionTitle}>Segurança</Text>
-            <Text style={styles.optionSubtitle}>Alterar senha e configurações</Text>
-          </View>
-          <Feather name="chevron-right" size={20} color="#ccc" />
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.optionItem}
           onPress={() => setNotificationsModalVisible(true)}
         >
           <View style={styles.optionIcon}>
-            <Feather name="bell" size={20} color="#2196F3" />
+            <Feather name="bell" size={20} color="#FF9800" />
           </View>
           <View style={styles.optionContent}>
             <Text style={styles.optionTitle}>Notificações</Text>
@@ -737,7 +567,7 @@ export default function Profile() {
           onPress={() => setHelpModalVisible(true)}
         >
           <View style={styles.optionIcon}>
-            <Feather name="help-circle" size={20} color="#5ECC63" />
+            <Feather name="help-circle" size={20} color="#2196F3" />
           </View>
           <View style={styles.optionContent}>
             <Text style={styles.optionTitle}>Ajuda</Text>
@@ -774,11 +604,6 @@ export default function Profile() {
         onClose={() => setEditModalVisible(false)}
         userData={userData}
         onSave={handleUpdateProfile}
-      />
-
-      <SecurityModal
-        visible={securityModalVisible}
-        onClose={() => setSecurityModalVisible(false)}
       />
 
       <NotificationsModal
@@ -1238,6 +1063,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     marginTop: 12,
+    marginBottom: 25,
     borderLeftWidth: 4,
     borderLeftColor: '#2196F3',
   },
