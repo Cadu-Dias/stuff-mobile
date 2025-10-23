@@ -422,7 +422,6 @@ const ReportItem = ({ report, onPress }: { report: Report; onPress: (report: Rep
 export default function OrganizationDetailScreen() {
   const route = useRoute();
   const navigation = useNavigation<RootStackNavigationProp>();
-  const { tab } = route.params as { tab: "members" | "assets" | "reports" };
 
   const [organizationId, setOrganizationId] = useState<string>("");
   const [org, setOrg] = useState<Organization | null>(null);
@@ -440,12 +439,26 @@ export default function OrganizationDetailScreen() {
   const [reportsLoaded, setReportsLoaded] = useState(false);
   
   const [errorMsg, setErrorMsg] = useState("");
-  const [activeTab, setActiveTab] = useState<TabType>(tab ?? "members");
+  const [activeTab, setActiveTab] = useState<TabType>("members");
   const [createAssetModalVisible, setCreateAssetModalVisible] = useState(false);
   
   const organizationService = new OrganizationService();
   const assetsService = new AssetService();
   const reportService = new ReportService();
+
+  useFocusEffect(
+    useCallback(() => {
+      const { tab, createAsset } = (route.params || {}) as any;
+      
+      if (tab !== undefined || createAsset !== undefined) {
+        
+        if (tab !== undefined) setActiveTab(tab);
+        if (createAsset !== undefined) setCreateAssetModalVisible(createAsset);
+        
+        navigation.setParams({ tab: undefined, createAsset: undefined });
+      }
+    }, [route.params, navigation])
+  );
 
   useEffect(() => {
     const loadOrganizationId = async () => {
@@ -465,7 +478,6 @@ export default function OrganizationDetailScreen() {
         setInitialLoading(false);
       }
     };
-
     loadOrganizationId();
   }, []);
 
@@ -834,6 +846,7 @@ const styles = StyleSheet.create({
   skeletonContainer: {
     flex: 1,
     padding: 0,
+    overflow: "hidden"
   },
   skeletonItem: {
     flexDirection: 'row',
