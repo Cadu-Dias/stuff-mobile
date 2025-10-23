@@ -1,56 +1,26 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { UserInfo } from "../models/user.model";
+import httpClient from './api';
+import { UserInfo } from '../models/user.model';
 
 export class UserService {
-    private apiUrl = process.env.API_URL || "https://stuff-back.fly.dev";
 
-    public async getUserInfo() : Promise<UserInfo> {
+    public async getUserInfo(): Promise<UserInfo> {
         try {
-            console.log("Obtendo dado do usuário...");
+            console.log('Obtendo dados do usuário...');
 
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if(!accessToken) throw new Error("Usuário não autenticado!"); 
-
-            const response = await fetch(`${this.apiUrl}/users/me`, {
-                method: "GET",
-                headers: {
-                    "Authorization": `Bearer ${accessToken}`
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error("Não foi possível obter as informações do usuário");
-            }
-
-            const responseJson = await response.json();
-            return responseJson["data"];
-        } catch (error: any) {
+            const response = await httpClient.get<{ data: UserInfo }>('/users/me');
+            return response.data.data;
+        } catch (error) {
+            console.error('Erro ao obter informações do usuário:', error);
             throw error;
         }
     }
 
-    public async updateLoggedUser(infoToUpdate: Partial<UserInfo>) {
-
+    public async updateLoggedUser(infoToUpdate: Partial<UserInfo>): Promise<void> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/users/me`, {
-                method: "PATCH",
-                headers: {
-                    Accept: "application/json",
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${accessToken}`
-                },
-                body: JSON.stringify(infoToUpdate)
-            })
-
-            if(!response.ok) {
-                throw new Error("Não foi possível atualizar o perfil")
-            }
-
+            await httpClient.patch('/users/me', infoToUpdate);
+            console.log('Perfil atualizado com sucesso');
         } catch (error) {
-            console.log(error);
+            console.error('Erro ao atualizar perfil:', error);
             throw error;
         }
     }

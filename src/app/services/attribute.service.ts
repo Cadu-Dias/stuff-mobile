@@ -1,192 +1,94 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { AttributeDetail } from "../models/asset.model";
+import httpClient from './api';
+import { AttributeDetail } from '../models/asset.model';
 
 export class AttributeService {
-
-    private apiUrl = process.env.API_URL || "https://stuff-back.fly.dev";
-
-    public async getAttribute(attributeId: string) {
+    public async getAttribute(attributeId: string): Promise<AttributeDetail> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/attributes/${attributeId}`, {
-                method: "GET",
-                headers: { "Authorization": `Bearer ${accessToken}` }
-            })
-            
-
-            if(!response.ok) {
-                throw new Error("Não foi possível atualizar o Atributo")
-            }
-    
-            const responseJson = await response.json() as { data: AttributeDetail; message: string }
-            console.log(responseJson)
-            return responseJson.data
-            
+            const response = await httpClient.get<{ data: AttributeDetail; message: string }>(
+                `/attributes/${attributeId}`
+            );
+            console.log('Atributo obtido:', response.data);
+            return response.data.data;
         } catch (error) {
-            console.log(error);
+            console.error('Erro ao buscar atributo:', error);
             throw error;
         }
     }
 
-    public async createAttribute(attributeProperties: Record<string, any>) {
-        try{
-
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/attributes`, {
-                method: "POST",
-                headers: { 
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${accessToken}`,
-                },
-                body: JSON.stringify(attributeProperties) 
-            })
-            
-            if(!response.ok) {
-                throw new Error("Não foi possível realizar a criação do atributo")
-            }
-    
-            const responseJson = await response.json() as { data: AttributeDetail; message: string }
-            return responseJson.data
-            
+    public async createAttribute(attributeProperties: Record<string, any>): Promise<AttributeDetail> {
+        try {
+            const response = await httpClient.post<{ data: AttributeDetail; message: string }>(
+                '/attributes',
+                attributeProperties
+            );
+            console.log('Atributo criado com sucesso');
+            return response.data.data;
         } catch (error) {
+            console.error('Erro ao criar atributo:', error);
             throw error;
         }
     }
 
-    public async updateAttributeBasic(attributeId: string, attributeProperties: any) {
-
+    public async updateAttributeBasic(attributeId: string, attributeProperties: any): Promise<AttributeDetail> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-    
-            const response = await fetch(`${this.apiUrl}/attributes/${attributeId}`, {
-                method: "PATCH",
-                headers: { 
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${accessToken}`,
-                },
-                body: attributeProperties 
-            })
-            
-
-            if(!response.ok) {
-                throw new Error("Não foi possível atualizar o Atributo")
-            }
-    
-            const responseJson = await response.json() as { data: AttributeDetail; message: string }
-            console.log(responseJson)
-            return responseJson.data
-            
+            const response = await httpClient.patch<{ data: AttributeDetail; message: string }>(
+                `/attributes/${attributeId}`,
+                attributeProperties
+            );
+            console.log('Atributo atualizado:', response.data);
+            return response.data.data;
         } catch (error) {
-            console.log(error)
-            throw error
-        }
-    }
-
-    public async deleteAttribute(attributeId: string) {
-        try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/attributes/${attributeId}`, {
-                method: "DELETE",
-                headers: { "Authorization": `Bearer ${accessToken}` }
-            })
-                
-
-            if(!response.ok) {
-                throw new Error("Não foi possível deletar o atributo")
-            }
-        } catch (error) {
-            console.log(error)
-            throw error
-        }
-    }
-
-    public async createAttributeValue(attributeId: string, assetId: string, value: any) {
-        try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/attributes/${attributeId}/value`, {
-                method: "POST",
-                headers: { 
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${accessToken}`,
-                },
-                body: JSON.stringify({
-                    assetId: assetId,
-                    value: value
-                }) 
-            })
-
-            if(!response.ok) {
-                throw new Error("Não foi possível adicionar valor ao atributo")
-            }
-            
-        } catch (error) {
-            console.log(error)
+            console.error('Erro ao atualizar atributo:', error);
             throw error;
         }
     }
 
-    public async updateAttributeValue(attributeValueId: string, attributeValueProperties: Partial<{ value: string, timeUnit: string, metricUnit: string }>) {
+    public async deleteAttribute(attributeId: string): Promise<void> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-    
-            const response = await fetch(`${this.apiUrl}/attributes/value/${attributeValueId}`, {
-                method: "PATCH",
-                headers: { 
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${accessToken}`,
-                },
-                body: JSON.stringify(attributeValueProperties)
-            })
-            
-
-            if(!response.ok) {
-                console.log(response)
-                throw new Error("Não foi possível atualizar o Atributo")
-            }
-    
-            const responseJson = await response.json() as { data: AttributeDetail; message: string }
-            return responseJson.data
+            await httpClient.delete(`/attributes/${attributeId}`);
+            console.log('Atributo deletado com sucesso');
         } catch (error) {
-            console.log(error)
-            throw error
+            console.error('Erro ao deletar atributo:', error);
+            throw error;
         }
     }
 
-    public async deleteAttributeValue(attributeValueId: string) {
+    public async createAttributeValue(attributeId: string, assetId: string, value: any): Promise<void> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/attributes/value/${attributeValueId}`, {
-                method: "DELETE",
-                headers: { "Authorization": `Bearer ${accessToken}` }
-            })
-                
-
-            if(!response.ok) {
-                console.log(response)
-                throw new Error("Não foi possível deletar o valor do Atributo")
-            }
-
-            console.log("Valor do atributo deletado com sucesso!")
+            await httpClient.post(`/attributes/${attributeId}/value`, {
+                assetId,
+                value,
+            });
+            console.log('Valor do atributo criado com sucesso');
         } catch (error) {
-            console.log(error)
-            throw error
+            console.error('Erro ao criar valor do atributo:', error);
+            throw error;
         }
+    }
 
+    public async updateAttributeValue(
+        attributeValueId: string,
+        attributeValueProperties: Partial<{ value: string; timeUnit: string; metricUnit: string }>
+    ): Promise<AttributeDetail> {
+        try {
+            const response = await httpClient.patch<{ data: AttributeDetail; message: string }>(
+                `/attributes/value/${attributeValueId}`,
+                attributeValueProperties
+            );
+            return response.data.data;
+        } catch (error) {
+            console.error('Erro ao atualizar valor do atributo:', error);
+            throw error;
+        }
+    }
+
+    public async deleteAttributeValue(attributeValueId: string): Promise<void> {
+        try {
+            await httpClient.delete(`/attributes/value/${attributeValueId}`);
+            console.log('Valor do atributo deletado com sucesso');
+        } catch (error) {
+            console.error('Erro ao deletar valor do atributo:', error);
+            throw error;
+        }
     }
 }

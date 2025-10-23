@@ -1,28 +1,25 @@
+import httpClient from "./api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LoginData } from "../models/login.model";
+import { AxiosError } from "axios";
 
 export class AuthService {
-
-    private apiUrl = process.env.API_URL || "https://stuff-back.fly.dev"
 
 
     async loginUser(data: LoginData) {
         try {
             console.log('Tentando logar usuário:', data);
-            const response = await fetch(`${this.apiUrl}/auth/login`, {
-                method: "POST",
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    "email": data.email.trim(),
-                    "password": data.password.trim(),
-                })
-            });
 
-            if(!response.ok) {
-                switch(response.status) {
+            const response = await httpClient.post<{ accessToken: string }>("/auth/login", {
+                email: data.email.trim(),
+                password: data.password.trim()
+            }, { skipAuth: true })
+
+            await AsyncStorage.setItem("accessToken", response.data["accessToken"]);
+        } catch (error: any) {
+
+            if(error instanceof AxiosError) {
+                switch(error.status) {
                     case 400:
                         throw new Error("O e-mail ou a senha possuem valores invalídos. Insira os valores corretamente.")
                     case 404:
@@ -30,12 +27,33 @@ export class AuthService {
                     default:
                         throw new Error("Não foi possível realizar o login. Tente novamente mais tarde.");
                 }
-
             }
             
-            const responseJson = await response.json();
-            await AsyncStorage.setItem("accessToken", responseJson["accessToken"]);
+            throw error;
+        }
+    }
+
+    async requestPasswordReset(email: string) {
+        try {
+            console.log('Enviando e-mail para alterar a senha...');
+
+            const response = await httpClient.post<{ message: string }>("/auth/forgot-password", {
+                email: email.trim()
+            }, { skipAuth: true })
+
+            return response.data
         } catch (error: any) {
+
+            if(error instanceof AxiosError) {
+                console.log(error.response)
+                switch(error.status) {
+                    case 400:
+                        throw new Error("O e-mail possue valor invalído. Insira o valor corretamente.")
+                    default:
+                        throw new Error("Houve algum erro no envio do e-mail. Tente novamente mais tarde.");
+                }
+            }
+            
             throw error;
         }
     }

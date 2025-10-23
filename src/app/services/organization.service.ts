@@ -1,151 +1,102 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Organization } from "../models/organization.model";
+import httpClient from './api';
+import { Organization } from '../models/organization.model';
+import { UserInfo } from '../models/user.model';
 
 export class OrganizationService {
-  private apiUrl = process.env.API_URL || "https://stuff-back.fly.dev";
-
-  public async getAllOrganizations() : Promise<Organization[]> {
+  public async getAllOrganizations(): Promise<Organization[]> {
     try {
-      const accessToken = await AsyncStorage.getItem("accessToken");
-      if (!accessToken) throw new Error("Usuário não autenticado!");
-
-      const response = await fetch(`${this.apiUrl}/organizations/`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      const responseJson = await response.json() as { data: Organization[]};
-      return responseJson.data;
+      const response = await httpClient.get<{ data: Organization[] }>('/organizations');
+      return response.data.data;
     } catch (error) {
+      console.error('Erro ao buscar organizações:', error);
       throw error;
     }
   }
 
-  public async getOrganizationById(identifier: string) : Promise<Organization> {
+  public async getOrganizationById(identifier: string): Promise<Organization> {
     try {
-      const accessToken = await AsyncStorage.getItem("accessToken");
-      if (!accessToken) throw new Error("Usuário não autenticado!");
-
-      const response = await fetch(`${this.apiUrl}/organizations/${identifier}`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-      const responseJson = await response.json() as { data: Organization };
-      return responseJson.data;
+      const response = await httpClient.get<{ data: Organization }>(
+        `/organizations/${identifier}`
+      );
+      return response.data.data;
     } catch (error) {
+      console.error('Erro ao buscar organização:', error);
       throw error;
     }
   }
 
-  async createOrganization(orgInfo: { name: string; slug: string; description: string; password: string }) {
-    const accessToken = await AsyncStorage.getItem("accessToken");
-    if (!accessToken) throw new Error("Usuário não autenticado!");
-
-    const response = await fetch(`${this.apiUrl}/organizations/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(orgInfo),
-    });
-
-    const data = await response.json();
-    return data;
-  }
-
-  async deleteOrganization(id: string) {
-    const accessToken = await AsyncStorage.getItem("accessToken");
-    if (!accessToken) throw new Error("Usuário não autenticado!");
-
-    const response = await fetch(`${this.apiUrl}/organizations/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    const data = await response.json();
-    return data;
-  }
-
-  async getMembers(orgId: string) {
-    const accessToken = await AsyncStorage.getItem("accessToken");
-    if (!accessToken) throw new Error("Usuário não autenticado!");
-
-    const response = await fetch(
-      `${this.apiUrl}/organizations/${orgId}/members`,
-      {
-        method: "GET",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
-    );
-
-    if(!response.ok) {
-      throw new Error("Não foi possível carregar os membros da Organização!");
+  public async createOrganization(orgInfo: {name: string; slug: string; description: string;password: string }) {
+    try {
+      const response = await httpClient.post('/organizations', orgInfo);
+      console.log('Organização criada com sucesso');
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao criar organização:', error);
+      throw error;
     }
-
-    const responseJson = await response.json() as { data: any[]; message: string };
-    return responseJson.data;
   }
 
-  async addMember(orgId: string, member: { userId: string; role: string }) {
-    const accessToken = await AsyncStorage.getItem("accessToken");
-    if (!accessToken) throw new Error("Usuário não autenticado!");
-
-    const response = await fetch(
-      `${this.apiUrl}/organizations/${orgId}/members`,
-      {
-        method: "POST",
-        headers: { 
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}` 
-        },
-        body: JSON.stringify(member),
-      }
-    );
-
-    const data = await response.json();
-    return data;
+  public async deleteOrganization(id: string) {
+    try {
+      const response = await httpClient.delete(`/organizations/${id}`);
+      console.log('Organização deletada com sucesso');
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao deletar organização:', error);
+      throw error;
+    }
   }
 
-  async updateMemberRole(orgId: string, userId: string, role: string) {
-    const accessToken = await AsyncStorage.getItem("accessToken");
-    if (!accessToken) throw new Error("Usuário não autenticado!");
-
-    const response = await fetch(
-      `${this.apiUrl}/organizations/${orgId}/members/${userId}`,
-      {
-        method: "PATCH",
-        headers: { 
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}` 
-        },
-        body: JSON.stringify({ role }),
-      }
-    );
-
-    const data = await response.json();
-    return data;
+  public async getMembers(orgId: string): Promise<UserInfo[]> {
+    try {
+      const response = await httpClient.get<{ data: UserInfo[]; message: string }>(
+        `/organizations/${orgId}/members`
+      );
+      return response.data.data;
+    } catch (error) {
+      console.error('Erro ao buscar membros da organização:', error);
+      throw error;
+    }
   }
 
-  async deleteMember(orgId: string, userId: string) {
-    const accessToken = await AsyncStorage.getItem("accessToken");
-    if (!accessToken) throw new Error("Usuário não autenticado!");
+  public async addMember(orgId: string, member: { userId: string; role: string }) {
+    try {
+      const response = await httpClient.post(
+        `/organizations/${orgId}/members`,
+        member
+      );
+      console.log('Membro adicionado com sucesso');
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao adicionar membro:', error);
+      throw error;
+    }
+  }
 
-    const response = await fetch(
-      `${this.apiUrl}/organizations/${orgId}/members/${userId}`,
-      {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
-    );
+  public async updateMemberRole(orgId: string, userId: string, role: string) {
+    try {
+      const response = await httpClient.patch(
+        `/organizations/${orgId}/members/${userId}`,
+        { role }
+      );
+      console.log('Papel do membro atualizado com sucesso');
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao atualizar papel do membro:', error);
+      throw error;
+    }
+  }
 
-    const data = await response.json();
-    return data;
+  public async deleteMember(orgId: string, userId: string) {
+    try {
+      const response = await httpClient.delete(
+        `/organizations/${orgId}/members/${userId}`
+      );
+      console.log('Membro removido com sucesso');
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao remover membro:', error);
+      throw error;
+    }
   }
 }

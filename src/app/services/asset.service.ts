@@ -1,109 +1,78 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Asset } from "../models/asset.model";
+import httpClient from './api';
+import { Asset } from '../models/asset.model';
 
 export class AssetService {
 
-    private apiUrl = process.env.API_URL || "https://stuff-back.fly.dev"
-
     public async getAssets() {
-        const accessToken = await AsyncStorage.getItem("accessToken");
-        if (!accessToken) throw new Error("Usuário não autenticado!");
-
-        const response = await fetch(`${this.apiUrl}/assets`, {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${accessToken}` }
-        })
-
-        const responseJson = await response.json() as { data: { assets: Omit<Asset[], 'attributes'> }; message: string };
-        return responseJson.data;
-    }
-
-    public async getAssetInfo(assetId: string) {
-        const accessToken = await AsyncStorage.getItem("accessToken");
-        if (!accessToken) throw new Error("Usuário não autenticado!");
-
-        const response = await fetch(`${this.apiUrl}/assets/${assetId}`, {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${accessToken}` }
-        })
-
-        const responseJson = await response.json() as { data: Asset; message: string };
-        return responseJson.data;
-    }
-
-    public async getOrganizationAssets(organizationId: string) {
-        const accessToken = await AsyncStorage.getItem("accessToken");
-        if (!accessToken) throw new Error("Usuário não autenticado!");
-        
-        const response = await fetch(`${this.apiUrl}/organizations/${organizationId}/assets`, {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${accessToken}` }
-        })
-
-        if(!response.ok) {
-            console.log(response);
-            throw new Error("Não foi possível obter dados dos ativos da organização!");
-        }
-
-        const responseJson = await response.json() as { data: Asset[]; message: string };
-        return responseJson.data;
-    }
-
-
-    public async createAsset(assetProp: Pick<Asset, "name" | "type" | "organizationId" | "description" | "quantity">) {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/assets`, {
-                method: "POST",
-                headers: { 
-                    "Accept": "applcation/json",
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${accessToken}`
-                },
-                body: JSON.stringify({ ...assetProp })
-            })
-
-            if(!response.ok) {
-                throw new Error("Não foi possível adicionar um novo ativo")
-            }
-
-            const responseJson = await response.json() as { data: Asset[], message: string }
-            return responseJson.data[0];
+            const response = await httpClient.get<{ data: { assets: Omit<Asset[], 'attributes'> }; message: string }>(
+                '/assets'
+            );
+            return response.data.data;
         } catch (error) {
-            throw error
-        }        
+            console.error('Erro ao buscar assets:', error);
+            throw error;
+        }
     }
 
-    public async updateAsset(assetId: string, assetProperties: Omit<Partial<Asset>, "attributes">) {
-        const accessToken = await AsyncStorage.getItem("accessToken");
-        if (!accessToken) throw new Error("Usuário não autenticado!");
+    public async getAssetInfo(assetId: string): Promise<Asset> {
+        try {
+            const response = await httpClient.get<{ data: Asset; message: string }>(
+                `/assets/${assetId}`
+            );
+            return response.data.data;
+        } catch (error) {
+            console.error('Erro ao buscar asset:', error);
+            throw error;
+        }
+    }
 
-        const response = await fetch(`${this.apiUrl}/assets/${assetId}`, {
-            method: "PATCH",
-            headers: { 
-                "Accept": "applcation/json",
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${accessToken}`
-            },
-            body: JSON.stringify({ ...assetProperties })
-        })
+    public async getOrganizationAssets(organizationId: string): Promise<Asset[]> {
+        try {
+            const response = await httpClient.get<{ data: Asset[]; message: string }>(
+                `/organizations/${organizationId}/assets`
+            );
+            return response.data.data;
+        } catch (error) {
+            console.error('Erro ao buscar assets da organização:', error);
+            throw error;
+        }
+    }
 
-        const responseJson = await response.json() as { data: Omit<Asset, "attributes">; message: string }
-        return responseJson.data
+    public async createAsset(assetProp: Pick<Asset, 'name' | 'type' | 'organizationId' | 'description' | 'quantity'>): Promise<Asset> {
+        try {
+            const response = await httpClient.post<{ data: Asset[]; message: string }>(
+                '/assets',
+                assetProp
+            );
+            return response.data.data[0];
+        } catch (error) {
+            console.error('Erro ao criar asset:', error);
+            throw error;
+        }
+    }
+
+    public async updateAsset(assetId: string,assetProperties: Omit<Partial<Asset>, 'attributes'>): Promise<Omit<Asset, 'attributes'>> {
+        try {
+            const response = await httpClient.patch<{ data: Omit<Asset, 'attributes'>; message: string }>(
+                `/assets/${assetId}`,
+                assetProperties
+            );
+            return response.data.data;
+        } catch (error) {
+            console.error('Erro ao atualizar asset:', error);
+            throw error;
+        }
     }
 
     public async deleteAsset(assetId: string) {
-        const accessToken = await AsyncStorage.getItem("accessToken");
-        if (!accessToken) throw new Error("Usuário não autenticado!");
-
-        const response = await fetch(`${this.apiUrl}/assets/${assetId}`, {
-            method: "DELETE",
-            headers: { Authorization: `Bearer ${accessToken}` },
-        });
-
-        const data = await response.json();
-        return data;
+        try {
+            const response = await httpClient.delete(`/assets/${assetId}`);
+            console.log('Asset deletado com sucesso');
+            return response.data;
+        } catch (error) {
+            console.error('Erro ao deletar asset:', error);
+            throw error;
+        }
     }
 }

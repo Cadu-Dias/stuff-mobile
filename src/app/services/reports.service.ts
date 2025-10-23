@@ -1,185 +1,109 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Report, ReportCreation, ReportCsvModel } from "../models/reports.model";
-import * as FileSystem from 'expo-file-system';
+import httpClient from "./api";
+import {
+  Report,
+  ReportCreation,
+  ReportCsvModel,
+} from "../models/reports.model";
+import * as FileSystem from "expo-file-system";
 
 export class ReportService {
-    
-    private apiUrl = process.env.API_URL || "https://stuff-back.fly.dev";
 
-    public async generatePresignedUrl(filename: string) {
+    public async generatePresignedUrl(filename: string): Promise<{ url: string; key: string }> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
             const filenameTreated = filename
                 .replace(/ /g, "_")
                 .replace(/-/g, "_")
                 .toLowerCase();
 
-            const response = await fetch(`${this.apiUrl}/reports/upload`, {
-                method: "POST",
-                headers: { 
-                    "Authorization": `Bearer ${accessToken}`,
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ filename: filenameTreated })
-            })
-            
+            const response = await httpClient.post<{
+                data: { url: string; key: string };
+            }>("/reports/upload", { filename: filenameTreated });
 
-            if(!response.ok) {
-                throw new Error("Não foi gerar a URL pré-assinada");
-            }
-            
-            const responseJson = await response.json() as { data: { url: string; key: string }};
-            return responseJson.data;
-            
+            return response.data.data;
         } catch (error) {
-            console.log(error);
+            console.error("Erro ao gerar URL pré-assinada:", error);
             throw error;
         }
     }
 
-    public async getReport(reportId: string) {
+    public async getReport(reportId: string): Promise<Report> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/reports/${reportId}`, {
-                method: "GET",
-                headers: { "Authorization": `Bearer ${accessToken}` }
-            })
-
-            if(!response.ok) {
-                throw new Error("Não possível obter relatório específico");
-            }
-
-            const responseJson = await response.json() as { message: string; data: Report }
-            return responseJson.data
-            
+            const response = await httpClient.get<{ message: string; data: Report }>(
+                `/reports/${reportId}`
+            );
+            return response.data.data;
         } catch (error) {
-            console.log(error);
+            console.error("Erro ao buscar relatório:", error);
             throw error;
         }
     }
-    
-    public async getAllReports() {
+
+    public async getAllReports(): Promise<Report[]> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/reports`, {
-                method: "GET",
-                headers: { "Authorization": `Bearer ${accessToken}` }
-            })
-
-            if(!response.ok) {
-                throw new Error("Não possível obter os relatórios");
-            }
-
-            const responseJson = await response.json() as Report[]
-            return responseJson
-            
+            const response = await httpClient.get<Report[]>("/reports");
+            return response.data;
         } catch (error) {
-            console.log(error);
+            console.error("Erro ao buscar relatórios:", error);
             throw error;
         }
     }
 
-    public async getOrganizationReports(organizationId: string) {
+    public async getOrganizationReports(organizationId: string): Promise<Report[]> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-
-            const response = await fetch(`${this.apiUrl}/organizations/${organizationId}/reports`, {
-                method: "GET",
-                headers: { "Authorization": `Bearer ${accessToken}` }
-            })
-
-            if(!response.ok) {
-                throw new Error("Não possível obter os relatórios");
-            }
-
-            const responseJson = await response.json() as { message: string; data: Report[] }
-            return responseJson.data
-            
+            const response = await httpClient.get<{
+                message: string;
+                data: Report[];
+            }>(`/organizations/${organizationId}/reports`);
+            return response.data.data;
         } catch (error) {
-            console.log(error);
+            console.error("Erro ao buscar relatórios da organização:", error);
             throw error;
         }
     }
 
-    public async createReport(report: ReportCreation) {
-
+    public async createReport(report: ReportCreation): Promise<void> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
-    
-            const response = await fetch(`${this.apiUrl}/reports`, {
-                method: "POST",
-                headers: { 
-                    "Authorization": `Bearer ${accessToken}`,
-                    "Accept": 'application/json',
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(report)
-            })
-            
-
-            const responseJson = await response.json();
-            if(!response.ok) {
-                throw new Error("Não foi possível criar o relatório: " + responseJson["message"])
-            }
-
-            console.log("Relatório criado com sucesso: " + responseJson["message"]);
-
+            const response = await httpClient.post("/reports", report);
+            console.log("✅ Relatório criado com sucesso:", response.data.message);
         } catch (error) {
-            console.log(error);
+            console.error("Erro ao criar relatório:", error);
             throw error;
         }
     }
 
-    public async downloadReport(key: string) {
+    public async downloadReport(key: string): Promise<string> {
         try {
-            const accessToken = await AsyncStorage.getItem("accessToken");
-            if (!accessToken) throw new Error("Usuário não autenticado!");
+            const response = await httpClient.get<{
+                message: string;
+                data: { url: string };
+            }>(`/reports/download?key=${key}`);
 
-            const downloadResponse = await fetch(`${this.apiUrl}/reports/download?key=${key}`, {
-                method: "GET",
-                headers: { "Authorization": `Bearer ${accessToken}` }
-            })
+            const downloadUrl = response.data.data.url;
+            const csvResponse = await httpClient.get(downloadUrl, {
+                skipAuth: true,
+            });
 
-            if(!downloadResponse.ok) {
-                throw new Error("Não possível realizar o download do s");
-            }
-
-            const downloadContent = await downloadResponse.json() as { message: string; data: { url: string } }
-            const downloadUrl = downloadContent.data.url
-
-            const csvResponse = await fetch(downloadUrl, { method: "GET" });
-            const csvText = await csvResponse.text();
-            return csvText;
-            
+            return csvResponse.data;
         } catch (error) {
-            console.log(error);
+            console.error("Erro ao baixar relatório:", error);
             throw error;
         }
     }
 
-    public async uploadFileAsCSV(presignedUrl: string, scanResults: ReportCsvModel[]) {
+    public async uploadFileAsCSV(presignedUrl: string, scanResults: ReportCsvModel[]): Promise<void> {
         try {
             const csvContent = this.transformJsonCSVString(scanResults);
-            console.log(csvContent);
-            
-            const path = FileSystem.cacheDirectory + 'dados.csv';
+            console.log("📄 CSV gerado");
+
+            const path = FileSystem.cacheDirectory + "dados.csv";
             await FileSystem.writeAsStringAsync(path, csvContent, {
-                encoding: FileSystem.EncodingType.UTF8
+                encoding: FileSystem.EncodingType.UTF8,
             });
 
             const uploadResult = await FileSystem.uploadAsync(presignedUrl, path, {
-                httpMethod: 'PUT',
+                httpMethod: "PUT",
                 headers: {
-                    'Content-Type': 'text/csv',
+                "Content-Type": "text/csv",
                 },
             });
 
@@ -188,38 +112,34 @@ export class ReportService {
             }
 
             await FileSystem.deleteAsync(path, { idempotent: true });
-            console.log('✅ Upload feito com sucesso para o S3!');
+            console.log("✅ Upload feito com sucesso para o S3!");
         } catch (error) {
-            console.error('Erro no upload:', error);
+            console.error("Erro no upload:", error);
             throw error;
         }
     }
 
     private transformJsonCSVString(scanResults: ReportCsvModel[]): string {
+
         if (!scanResults?.length) {
             return "";
         }
-        
 
         const keys = Object.keys(scanResults[0]) as (keyof ReportCsvModel)[];
         const headers = keys.join(",");
 
         const escapeValue = (value: string | boolean): string => {
-            if (value == null) return "";
+        if (value == null) return "";
             const str = String(value);
-
             return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
         };
 
-        console.log(scanResults)
-
-        const rows = scanResults.map(result =>
-            keys.map(key => escapeValue(result[key] ?? "")).join(",")
+        const rows = scanResults.map((result) =>
+            keys.map((key) => escapeValue(result[key] ?? "")).join(",")
         );
 
-        console.log(rows)
+        console.log("📋 Linhas CSV:", rows);
 
         return [headers, ...rows].join("\n");
     }
-
 }
