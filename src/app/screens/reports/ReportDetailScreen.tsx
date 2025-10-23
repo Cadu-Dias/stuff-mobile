@@ -8,6 +8,7 @@ import {
   Alert,
   TouchableOpacity,
   FlatList,
+  Platform,
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -15,6 +16,8 @@ import { Report } from '../../models/reports.model';
 import { ReportService } from '../../services/reports.service';
 import Papa from 'papaparse';
 import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
+import * as FileSystem from 'expo-file-system';
 
 type RouteParams = {
   report: Report;
@@ -68,7 +71,6 @@ const DataCard = ({ data, index }: { data: any; index: number }) => {
 
   const formatDate = (dateString: string) => {
     try {
-
       if (!dateString || !dateString.trim()) return '';
       if (!dateString.includes("T")) return dateString;
 
@@ -93,12 +95,12 @@ const DataCard = ({ data, index }: { data: any; index: number }) => {
     }
   }
 
-  const fieldsFormatted : [string, unknown][] = fields.map(([key, value]) => {
-    if(key.toLowerCase().includes("date")) {
+  const fieldsFormatted: [string, unknown][] = fields.map(([key, value]) => {
+    if (key.toLowerCase().includes("date")) {
       return [key as string, formatDate(value as string) as unknown]
     }
 
-    return [key as string, value] 
+    return [key as string, value]
   });
 
   return (
@@ -193,6 +195,7 @@ export default function ReportDetailScreen() {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('cards');
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
   const reportService = new ReportService();
 
@@ -205,7 +208,6 @@ export default function ReportDetailScreen() {
     setError('');
 
     try {
-      // Extrair key da URL
       const urlParts = report.file_url.split('/');
       const key = urlParts.slice(-2).join('/');
       
@@ -214,7 +216,6 @@ export default function ReportDetailScreen() {
       const csvText = await reportService.downloadReport(key);
       console.log('✅ CSV baixado, parseando dados...');
 
-      // Parsear CSV
       Papa.parse(csvText, {
         header: true,
         skipEmptyLines: true,
@@ -243,49 +244,8 @@ export default function ReportDetailScreen() {
     }
   };
 
-  const handleShare = async () => {
-    try {
-      Alert.alert('Compartilhar', 'Funcionalidade em desenvolvimento');
-    } catch (error) {
-      console.error('Erro ao compartilhar:', error);
-    }
-  };
-
-  const formatReportDateTitle = (title: string): string => {
-    try {
-      if (!title || !title.trim()) return '';
-
-      const scanType = title.includes("RFID Scan") 
-        ? "RFID Scan" 
-          : title.includes("QR Code Scan")
-        ? "QR Code Scan"
-          : null;
-
-      if (!scanType) {
-        console.warn('Tipo de scan não encontrado no título:', title);
-        return title;
-      }
-
-      const parts = title.split(scanType);
-      const textTitle = parts[0]?.trim() || '';
-      const dateStr = parts[1]?.trim() || '';
-
-      console.log('Text Title:', textTitle);
-      console.log('Date String:', dateStr);
-      
-      const formattedDate = formatDate(dateStr);
-      return `${textTitle} ${scanType} ${formattedDate}`.trim();
-      
-    } catch (error) {
-      console.error('Erro ao formatar título do relatório:', error);
-      return title;
-    }
-  }
-
-
   const formatDate = (dateString: string) => {
     try {
-
       if (!dateString || !dateString.trim()) return '';
       if (!dateString.includes("T")) return dateString;
 
@@ -309,6 +269,268 @@ export default function ReportDetailScreen() {
       return dateString;
     }
   }
+
+  const formatReportDateTitle = (title: string): string => {
+    try {
+      if (!title || !title.trim()) return '';
+
+      const scanType = title.includes("RFID Scan") 
+        ? "RFID Scan" 
+        : title.includes("QR Code Scan")
+        ? "QR Code Scan"
+        : null;
+
+      if (!scanType) {
+        console.warn('Tipo de scan não encontrado no título:', title);
+        return title;
+      }
+
+      const parts = title.split(scanType);
+      const textTitle = parts[0]?.trim() || '';
+      const dateStr = parts[1]?.trim() || '';
+
+      console.log('Text Title:', textTitle);
+      console.log('Date String:', dateStr);
+      
+      const formattedDate = formatDate(dateStr);
+      return `${textTitle} ${scanType} ${formattedDate}`.trim();
+      
+    } catch (error) {
+      console.error('Erro ao formatar título do relatório:', error);
+      return title;
+    }
+  }
+
+  const generateHTMLContent = () => {
+    const formattedTitle = formatReportDateTitle(report.title);
+    const creationDate = formatDate(report.createdAt);
+
+    // Gera as linhas da tabela
+    const tableRows = csvData.map((row, index) => {
+      const cells = csvHeaders.map(header => {
+        const value = row[header] || '-';
+        return `<td style="padding: 12px; border: 1px solid #e0e0e0; font-size: 11px;">${value}</td>`;
+      }).join('');
+      
+      return `
+        <tr style="background-color: ${index % 2 === 0 ? '#ffffff' : '#f8f9fa'};">
+          <td style="padding: 12px; border: 1px solid #e0e0e0; font-weight: 600; text-align: center; font-size: 11px;">${index + 1}</td>
+          ${cells}
+        </tr>
+      `;
+    }).join('');
+
+    // Gera os headers da tabela
+    const tableHeaders = csvHeaders.map(header => 
+      `<th style="padding: 12px; background-color: #F4A64E; color: white; border: 1px solid #e0e0e0; font-size: 12px; font-weight: 600;">${header}</th>`
+    ).join('');
+
+    return `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${formattedTitle}</title>
+        <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          body {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            padding: 40px;
+            background-color: #ffffff;
+            color: #333;
+          }
+          .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #F4A64E;
+          }
+          .logo {
+            font-size: 32px;
+            font-weight: bold;
+            color: #F4A64E;
+            margin-bottom: 10px;
+          }
+          .report-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+          }
+          .report-date {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 20px;
+          }
+          .stats {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 20px;
+          }
+          .stat-item {
+            text-align: center;
+          }
+          .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #F4A64E;
+          }
+          .stat-label {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            margin-top: 4px;
+          }
+          .table-container {
+            margin-top: 30px;
+            overflow-x: auto;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+          }
+          .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            font-size: 12px;
+            color: #888;
+          }
+          .page-break {
+            page-break-after: always;
+          }
+          @media print {
+            body {
+              padding: 20px;
+            }
+            .header {
+              margin-bottom: 30px;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="logo">Stuff.</div>
+          <div class="report-title">${formattedTitle}</div>
+          <div class="report-date">📅 Gerado em: ${creationDate}</div>
+          
+          <div class="stats">
+            <div class="stat-item">
+              <div class="stat-value">${csvData.length}</div>
+              <div class="stat-label">Registros</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${csvHeaders.length}</div>
+              <div class="stat-label">Colunas</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="padding: 12px; background-color: #F4A64E; color: white; border: 1px solid #e0e0e0; font-size: 12px; font-weight: 600;">#</th>
+                ${tableHeaders}
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="footer">
+          <p>Relatório gerado pelo sistema Stuff.</p>
+          <p>Total de ${csvData.length} registros processados</p>
+        </div>
+      </body>
+      </html>
+    `;
+  };
+
+  const generatePDFFileName = () => {
+    const cleanTitle = report.title
+      .replace(/[^a-zA-Z0-9\s]/g, '')
+      .replace(/\s+/g, '_')
+      .substring(0, 50);
+    
+    const timestamp = new Date().getTime();
+    return `${cleanTitle}_${timestamp}.pdf`;
+  };
+
+  const handleShare = async () => {
+    if (csvData.length === 0) {
+      Alert.alert('Aviso', 'Não há dados para compartilhar');
+      return;
+    }
+
+    try {
+      setIsGeneratingPDF(true);
+
+      console.log('📄 Gerando PDF...');
+      const htmlContent = generateHTMLContent();
+      
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+        base64: false,
+      });
+
+      console.log('✅ PDF gerado:', uri);
+
+      // Renomear o arquivo
+      const fileName = generatePDFFileName();
+      const newUri = `${FileSystem.documentDirectory}${fileName}`;
+      
+      await FileSystem.moveAsync({
+        from: uri,
+        to: newUri,
+      });
+
+      console.log('📁 PDF salvo em:', newUri);
+
+      setIsGeneratingPDF(false);
+
+      // Verificar se o compartilhamento está disponível
+      const isAvailable = await Sharing.isAvailableAsync();
+      
+      if (!isAvailable) {
+        Alert.alert(
+          'PDF Gerado',
+          `O PDF foi salvo em: ${newUri}`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Compartilhar o arquivo
+      await Sharing.shareAsync(newUri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Compartilhar Relatório',
+        UTI: 'com.adobe.pdf',
+      });
+
+      console.log('✅ PDF compartilhado com sucesso');
+
+    } catch (error) {
+      console.error('❌ Erro ao gerar/compartilhar PDF:', error);
+      setIsGeneratingPDF(false);
+      Alert.alert(
+        'Erro',
+        'Não foi possível gerar o PDF. Tente novamente.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
 
   const toggleViewMode = () => {
     setViewMode(viewMode === 'cards' ? 'table' : 'cards');
@@ -347,6 +569,19 @@ export default function ReportDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* Loading Overlay para geração de PDF */}
+      {isGeneratingPDF && (
+        <View style={styles.pdfLoadingOverlay}>
+          <View style={styles.pdfLoadingContent}>
+            <ActivityIndicator size="large" color="#F4A64E" />
+            <Text style={styles.pdfLoadingText}>Gerando PDF...</Text>
+            <Text style={styles.pdfLoadingSubtext}>
+              Processando {csvData.length} registros
+            </Text>
+          </View>
+        </View>
+      )}
+
       <View style={styles.main}>
         <View style={styles.reportHeader}>
           <View style={styles.reportHeaderTop}>
@@ -379,7 +614,11 @@ export default function ReportDetailScreen() {
 
           {/* Controles */}
           <View style={styles.controlsContainer}>
-            <TouchableOpacity style={styles.viewModeButton} onPress={toggleViewMode}>
+            <TouchableOpacity 
+              style={styles.viewModeButton} 
+              onPress={toggleViewMode}
+              disabled={isGeneratingPDF}
+            >
               <Feather 
                 name={viewMode === 'cards' ? 'list' : 'grid'} 
                 size={18} 
@@ -390,9 +629,21 @@ export default function ReportDetailScreen() {
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-              <Feather name="share-2" size={18} color="#2196F3" />
-              <Text style={styles.shareButtonText}>Compartilhar</Text>
+            <TouchableOpacity 
+              style={[
+                styles.shareButton,
+                isGeneratingPDF && styles.shareButtonDisabled
+              ]} 
+              onPress={handleShare}
+              disabled={isGeneratingPDF}
+            >
+              <Feather name="share-2" size={18} color={isGeneratingPDF ? "#999" : "#2196F3"} />
+              <Text style={[
+                styles.shareButtonText,
+                isGeneratingPDF && styles.shareButtonTextDisabled
+              ]}>
+                {isGeneratingPDF ? 'Gerando...' : 'Compartilhar'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -611,10 +862,54 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 8,
   },
+  shareButtonDisabled: {
+    backgroundColor: '#F5F5F5',
+  },
   shareButtonText: {
     color: '#2196F3',
     fontSize: 14,
     fontWeight: '600',
+  },
+  shareButtonTextDisabled: {
+    color: '#999',
+  },
+  pdfLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  pdfLoadingContent: {
+    backgroundColor: 'white',
+    padding: 30,
+    borderRadius: 16,
+    alignItems: 'center',
+    gap: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
+  },
+  pdfLoadingText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  pdfLoadingSubtext: {
+    fontSize: 14,
+    color: '#666',
   },
   dataContainer: {
     flex: 1,
