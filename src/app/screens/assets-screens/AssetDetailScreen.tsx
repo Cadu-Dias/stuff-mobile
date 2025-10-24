@@ -10,12 +10,13 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { AssetService } from '../../services/asset.service';
-import { Asset, AttributeDetail, AttributeValue } from '../../models/asset.model';
+import { Asset, AssetRFID, AttributeDetail, AttributeValue } from '../../models/asset.model';
 import { RootStackNavigationProp } from '../../models/stackType';
 import { AttributeService } from '../../services/attribute.service';
 import useBLE from '../../hooks/useBle';
 import { BluetoothDevice } from 'react-native-bluetooth-classic';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { OrganizationService } from '../../services/organization.service';
 
 const ATTRIBUTE_TYPES = {
     number: 'Número',
@@ -31,12 +32,18 @@ const ATTRIBUTE_TYPES = {
 };
 
 interface RFIDScanModalProps {
-    visible: boolean;
-    onClose: () => void;
-    onRFIDScanned: (rfid: string) => void;
+  visible: boolean;
+  onClose: () => void;
+  onRFIDScanned: (rfid: string) => void;
+  existingRFIDs?: Array<{ assetId: string; assetName: string; rfidTag: string }>; //  Novo parâmetro
 }
 
-const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) => {
+const RFIDScanModal = ({ 
+  visible, 
+  onClose, 
+  onRFIDScanned,
+  existingRFIDs = []
+}: RFIDScanModalProps) => {
     const {
         allDevices,
         isDiscovering,
@@ -54,8 +61,8 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     const [connectingTo, setConnectingTo] = useState<BluetoothDevice | null>(null);
     const [scanStage, setScanStage] = useState<'confirmation' | 'discovery' | 'scanning'>('discovery');
     const [savedDevice, setSavedDevice] = useState<{name: string, address: string} | null>(null);
-    
-    // Estados de permissões
+    const [ignoredRfids, setIgnoredRfids] = useState<Set<string>>(new Set());
+
     const [permissionStatus, setPermissionStatus] = useState({
         bluetooth: false,
         location: false,
@@ -63,7 +70,6 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     });
     const [isCheckingPermissions, setIsCheckingPermissions] = useState(false);
 
-    // Verificação de permissões
     const checkAllPermissions = useCallback(async () => {
         if (!visible) return;
 
@@ -83,18 +89,15 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
 
             setPermissionStatus(newStatus);
 
-            // Se alguma permissão foi revogada durante uso
             const allEnabled = bluetooth && location && nearbyDevices;
             
             if (!allEnabled) {
-                console.log('⚠️ Permissão revogada no RFIDScanModal');
-                
-                // Parar descoberta se estiver ativa
+                console.log('Permissão revogada no RFIDScanModal');
+
                 if (isDiscovering) {
                     await cancelDiscovery();
                 }
-                
-                // Desconectar se estiver conectado
+
                 if (connectedDevice) {
                     await disconnectFromDevice();
                     setScanStage('discovery');
@@ -119,25 +122,21 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
         checkNearbyDevicesPermission,
     ]);
 
-    // Verificação constante enquanto modal está aberto
     useEffect(() => {
         if (!visible) {
-            console.log('🔕 RFIDScanModal fechado, parando verificações');
+            console.log('RFIDScanModal fechado, parando verificações');
             return;
         }
 
-        console.log('🔔 RFIDScanModal aberto, iniciando verificações');
-        
-        // Verificação inicial
+        console.log('RFIDScanModal aberto, iniciando verificações');
         checkAllPermissions();
 
-        // Verificação a cada 2 segundos
         const interval = setInterval(() => {
             checkAllPermissions();
         }, 2000);
 
         return () => {
-            console.log('🧹 Limpando verificações do RFIDScanModal');
+            console.log('Limpando verificações do RFIDScanModal');
             clearInterval(interval);
         };
     }, [visible, checkAllPermissions]);
@@ -145,12 +144,13 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     useEffect(() => {
         if (visible) {
             checkSavedDevice();
+            setIgnoredRfids(new Set());
         } else {
-            // Limpar tudo ao fechar
             cancelDiscovery();
             disconnectFromDevice();
             setScanStage('discovery');
             setConnectingTo(null);
+            setIgnoredRfids(new Set());
         }
     }, [visible]);
 
@@ -165,7 +165,6 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
                 setSavedDevice(null);
                 setScanStage('discovery');
                 
-                // Só iniciar scan se tiver permissões
                 const hasPermissions = await checkAllPermissions();
                 if (hasPermissions) {
                     scanForPeripherals();
@@ -189,18 +188,33 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     }, [connectedDevice]);
 
     useEffect(() => {
-        if (scannedRfids.length > 0 && scanStage === 'scanning') {
-            const firstRFID = scannedRfids[0];
-            onRFIDScanned(firstRFID);
+        if (scannedRfids.length === 0 || scanStage !== 'scanning') return;
+
+        const latestRfid = scannedRfids[scannedRfids.length - 1];
+
+        if (ignoredRfids.has(latestRfid.toLowerCase())) {
+            console.log('RFID já processado, ignorando:', latestRfid);
+            return;
+        }
+
+        const existingAsset = existingRFIDs.find(
+            item => item.rfidTag.toLowerCase() === latestRfid.toLowerCase()
+        );
+
+        if (existingAsset) {
+            console.log('RFID já cadastrado no ativo:', existingAsset.assetName, '- Ignorando e continuando scan');
+            setIgnoredRfids(prev => new Set(prev).add(latestRfid.toLowerCase()));
+        } else {
+            console.log('RFID único encontrado, usando:', latestRfid);
+            onRFIDScanned(latestRfid);
             disconnectFromDevice();
             onClose();
         }
-    }, [scannedRfids, scanStage]);
+    }, [scannedRfids, scanStage, existingRFIDs, ignoredRfids]);
 
     const handleUseSavedDevice = async () => {
         if (!savedDevice) return;
 
-        // Verificar permissões antes de conectar
         const hasPermissions = await checkAllPermissions();
         if (!hasPermissions) {
             Alert.alert(
@@ -248,7 +262,6 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
             setSavedDevice(null);
             setScanStage('discovery');
             
-            // Verificar permissões antes de escanear
             const hasPermissions = await checkAllPermissions();
             if (hasPermissions) {
                 scanForPeripherals();
@@ -267,7 +280,6 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     const handleConnectPress = async (device: BluetoothDevice) => {
         if (connectingTo || connectedDevice) return;
 
-        // Verificar permissões antes de conectar
         const hasPermissions = await checkAllPermissions();
         if (!hasPermissions) {
             Alert.alert(
@@ -293,6 +305,7 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     const handleClose = async () => {
         await cancelDiscovery();
         await disconnectFromDevice();
+        setIgnoredRfids(new Set());
         onClose();
     };
 
@@ -328,7 +341,6 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
         }
     };
 
-    // Componente de status de permissões
     const renderPermissionStatus = () => {
         const allEnabled = permissionStatus.bluetooth && 
                           permissionStatus.location && 
@@ -595,9 +607,21 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
                     <View style={styles.scanningInstruction}>
                         <Feather name="info" size={16} color="#2196F3" />
                         <Text style={styles.scanningInstructionText}>
-                            O primeiro RFID detectado será automaticamente preenchido no campo
+                            {existingRFIDs.length > 0 
+                                ? 'Tags já cadastradas serão ignoradas automaticamente'
+                                : 'O primeiro RFID detectado será automaticamente preenchido no campo'
+                            }
                         </Text>
                     </View>
+
+                    {ignoredRfids.size > 0 && (
+                        <View style={styles.ignoredRfidsInfo}>
+                            <MaterialCommunityIcons name="information-outline" size={16} color="#FF9800" />
+                            <Text style={styles.ignoredRfidsText}>
+                                {ignoredRfids.size} tag{ignoredRfids.size > 1 ? 's' : ''} já cadastrada{ignoredRfids.size > 1 ? 's' : ''} ignorada{ignoredRfids.size > 1 ? 's' : ''}
+                            </Text>
+                        </View>
+                    )}
                 </View>
 
                 <TouchableOpacity style={styles.cancelScanButton} onPress={handleClose}>
@@ -618,16 +642,17 @@ const RFIDScanModal = ({ visible, onClose, onRFIDScanned }: RFIDScanModalProps) 
     );
 };
 
+
 interface EditModalProps {
     visible: boolean;
     type: 'asset' | 'new-attribute';
     data: any;
-    assetId?: string;
+    assetsRFIDs: AssetRFID[]
     onSave: (data: any) => Promise<void>;
     onCancel: () => void;
 }
 
-const EditModal = ({ visible, type, data, assetId, onSave, onCancel }: EditModalProps) => {
+const EditModal = ({ visible, type, data, assetsRFIDs, onSave, onCancel }: EditModalProps) => {
     const [formData, setFormData] = useState(data || {});
     const [saving, setSaving] = useState(false);
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -699,7 +724,6 @@ const EditModal = ({ visible, type, data, assetId, onSave, onCancel }: EditModal
     };
 
     const handleOpenRfidScan = async () => {
-        // Verificar se Bluetooth está habilitado
         if (!isBluetoothEnabled) {
             Alert.alert(
                 "Bluetooth Desabilitado",
@@ -1312,21 +1336,22 @@ const EditModal = ({ visible, type, data, assetId, onSave, onCancel }: EditModal
                 visible={rfidScanModalVisible}
                 onClose={() => setRfidScanModalVisible(false)}
                 onRFIDScanned={handleRFIDScanned}
+                existingRFIDs={assetsRFIDs}
             />
         </>
     );
 };
 
-// Modal para editar valor
 interface EditValueModalProps {
     visible: boolean;
     value: AttributeValue | null;
     attributeType: string;
+    assetsRFIDs: AssetRFID[]
     onSave: (newValue: string) => void;
     onCancel: () => void;
 }
 
-const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: EditValueModalProps) => {
+const EditValueModal = ({ visible, value, attributeType, assetsRFIDs, onSave, onCancel }: EditValueModalProps) => {
     const [newValue, setNewValue] = useState('');
     const [saving, setSaving] = useState(false);
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -1349,7 +1374,6 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
         nearbyDevices: false,
     });
 
-    // Verificação de permissões
     const checkAllPermissions = useCallback(async () => {
         if (!visible || attributeType !== 'rfid') return;
 
@@ -1382,19 +1406,15 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
         checkNearbyDevicesPermission
     ]);
 
-    // Verificação constante para tipo RFID
     useEffect(() => {
         if (!visible || attributeType !== 'rfid') {
-            console.log('🔕 EditValueModal: não é RFID ou está fechado');
+            console.log('EditValueModal: não é RFID ou está fechado');
             return;
         }
 
-        console.log('🔔 EditValueModal: RFID aberto, verificando permissões');
+        console.log('EditValueModal: RFID aberto, verificando permissões');
         
-        // Verificação inicial
         checkAllPermissions();
-
-        // Verificação a cada 2 segundos
         const interval = setInterval(() => {
             checkAllPermissions();
         }, 2000);
@@ -1820,22 +1840,21 @@ const EditValueModal = ({ visible, value, attributeType, onSave, onCancel }: Edi
                 visible={rfidScanModalVisible}
                 onClose={() => setRfidScanModalVisible(false)}
                 onRFIDScanned={handleRFIDScanned}
+                existingRFIDs={assetsRFIDs}
             />
         </>
     );
 };
 
-// ... (resto do código continua igual - AttributeItem e AssetDetailScreen)
-// Por brevidade, continuando apenas com os styles atualizados
 
 const AttributeItem = ({
     attribute,
-    assetId,
+    assetsRFIDs,
     onDelete,
     onRefresh
 }: {
     attribute: AttributeDetail;
-    assetId: string;
+    assetsRFIDs: AssetRFID[];
     onDelete: (attributeId: string) => void;
     onRefresh: () => void;
 }) => {
@@ -2032,6 +2051,7 @@ const AttributeItem = ({
                 visible={editValueModalVisible}
                 value={selectedValue}
                 attributeType={attribute.type}
+                assetsRFIDs={assetsRFIDs}
                 onSave={handleSaveValue}
                 onCancel={() => setEditValueModalVisible(false)}
             />
@@ -2042,7 +2062,7 @@ const AttributeItem = ({
 export default function AssetDetailScreen() {
     const route = useRoute();
     const navigation = useNavigation<RootStackNavigationProp>();
-    const { assetId, organizationId } = route.params as { organizationId: string; assetId: string };
+    const { assetId, organizationId, assetsRFIDs } = route.params as { organizationId: string; assetId: string, assetsRFIDs: AssetRFID[] };
 
     const [asset, setAsset] = useState<Asset | null>(null);
     const [loading, setLoading] = useState(true);
@@ -2309,7 +2329,7 @@ export default function AssetDetailScreen() {
                             <AttributeItem
                                 key={attribute.id}
                                 attribute={attribute}
-                                assetId={assetId}
+                                assetsRFIDs={assetsRFIDs}
                                 onDelete={handleDeleteAttribute}
                                 onRefresh={fetchAssetDetails}
                             />
@@ -2331,7 +2351,7 @@ export default function AssetDetailScreen() {
                 visible={editModalVisible}
                 type={editType}
                 data={editData}
-                assetId={assetId}
+                assetsRFIDs={assetsRFIDs}
                 onSave={handleSave}
                 onCancel={() => setEditModalVisible(false)}
             />
@@ -3112,6 +3132,7 @@ const styles = StyleSheet.create({
     },
     rfidStatusContainer: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         gap: 12,
         marginTop: 8,
         marginBottom: 4,
@@ -3344,4 +3365,19 @@ const styles = StyleSheet.create({
     buttonTextDisabled: {
         color: '#999',
     },
+    ignoredRfidsInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF3E0',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+        marginTop: 16,
+        gap: 8,
+    },
+    ignoredRfidsText: {
+        fontSize: 13,
+        color: '#E65100',
+        fontWeight: '500',
+    }
 });

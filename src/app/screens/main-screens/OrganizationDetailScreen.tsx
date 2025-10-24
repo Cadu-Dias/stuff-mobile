@@ -8,7 +8,8 @@ import { Feather } from '@expo/vector-icons';
 import { OrganizationService } from '../../services/organization.service';
 import { AssetService } from '../../services/asset.service';
 import { ReportService } from '../../services/reports.service';
-import { Asset } from '../../models/asset.model';
+import { AttributeService } from '../../services/attribute.service'; // ✅ Adicionar import
+import { Asset, AssetRFID } from '../../models/asset.model';
 import { Organization } from '../../models/organization.model';
 import { UserInfo } from '../../models/user.model';
 import { Report } from '../../models/reports.model';
@@ -35,7 +36,6 @@ const SkeletonList = ({ count = 5 }: { count?: number }) => (
   </View>
 );
 
-
 // Modal de criar ativo (sem alterações)
 const CreateAssetModal = ({ 
   visible, 
@@ -45,7 +45,7 @@ const CreateAssetModal = ({
 }: {
   visible: boolean;
   onClose: () => void;
-  onSave: (asset: Asset) => void;
+  onSave: () => void;
   organizationId: string;
 }) => {
   const [formData, setFormData] = useState({
@@ -71,7 +71,7 @@ const CreateAssetModal = ({
 
     setLoading(true);
     try {
-      const newAsset = await assetService.createAsset({
+      await assetService.createAsset({
         name: formData.name,
         type: formData.type,
         description: formData.description,
@@ -79,7 +79,7 @@ const CreateAssetModal = ({
         organizationId: organizationId
       });
 
-      onSave(newAsset);
+      onSave();
       setFormData({ name: '', type: 'unique', description: '', quantity: '1' });
       onClose();
       Alert.alert("Sucesso", "Ativo criado com sucesso!");
@@ -307,37 +307,57 @@ const MemberItem = ({ member }: { member: UserInfo }) => (
   </View>
 );
 
-const AssetItem = ({ item, onPress }: { item: Asset; onPress: (organizationId: string, assetId: string) => void }) => (
-  <TouchableOpacity style={styles.listItem} onPress={() => onPress(item.organizationId, item.id)}>
-    <View style={styles.itemContent}>
-      <View style={styles.itemIcon}>
-        <Feather name="package" size={20} color="#F4A64E" />
-      </View>
-      <View style={styles.itemDetails}>
-        <Text style={styles.itemTitle}>{item.name}</Text>
-        <Text style={styles.itemSubtitle}>{item.description}</Text>
-        <View style={styles.assetMetadata}>
-          <Text style={styles.assetType}>Tipo: {item.type}</Text>
-          <Text style={styles.assetQuantity}>Qtd: {item.quantity}</Text>
+const AssetItem = ({ 
+  item, 
+  assetsRfids,
+  onPress 
+}: { 
+  item: Asset; 
+  assetsRfids: AssetRFID[];
+  onPress: (organizationId: string, assetId: string, allRfids: AssetRFID[]) => void;
+}) => {
+  const hasRfid = assetsRfids.find((asset) => asset.assetId === item.id);
+
+  return (
+    <TouchableOpacity 
+      style={styles.listItem} 
+      onPress={() => onPress(item.organizationId, item.id, [])}
+    >
+      <View style={styles.itemContent}>
+        <View style={styles.itemIcon}>
+          <Feather name="package" size={20} color="#F4A64E" />
+        </View>
+        <View style={styles.itemDetails}>
+          <Text style={styles.itemTitle}>{item.name}</Text>
+          <Text style={styles.itemSubtitle}>{item.description}</Text>
+          <View style={styles.assetMetadata}>
+            <Text style={styles.assetType}>Tipo: {item.type}</Text>
+            <Text style={styles.assetQuantity}>Qtd: {item.quantity}</Text>
+            {hasRfid && (
+              <View style={styles.rfidBadge}>
+                <Feather name="radio" size={10} color="#2196F3" />
+                <Text style={styles.rfidBadgeText}>RFID</Text>
+              </View>
+            )}
+          </View>
         </View>
       </View>
-    </View>
-    <View style={[
-      styles.assetStatusBadge,
-      { backgroundColor: item.trashBin ? '#C62828' : '#5ECC63' }
-    ]}>
-      <Text style={styles.assetStatusText}>
-        {item.trashBin ? 'Lixeira' : 'Ativo'}
-      </Text>
-    </View>
-    <Feather name="chevron-right" size={20} color="#ccc" style={{ marginLeft: 8 }} />
-  </TouchableOpacity>
-);
+      <View style={[
+        styles.assetStatusBadge,
+        { backgroundColor: item.trashBin ? '#C62828' : '#5ECC63' }
+      ]}>
+        <Text style={styles.assetStatusText}>
+          {item.trashBin ? 'Lixeira' : 'Ativo'}
+        </Text>
+      </View>
+      <Feather name="chevron-right" size={20} color="#ccc" style={{ marginLeft: 8 }} />
+    </TouchableOpacity>
+  );
+};
 
 const ReportItem = ({ report, onPress }: { report: Report; onPress: (report: Report) => void }) => {
   const formatDate = (dateString: string): string => {
     try {
-
       if (!dateString || !dateString.trim()) return '';
       if (!dateString.includes("T")) return dateString;
 
@@ -368,9 +388,9 @@ const ReportItem = ({ report, onPress }: { report: Report; onPress: (report: Rep
 
       const scanType = title.includes("RFID Scan") 
         ? "RFID Scan" 
-          : title.includes("QR Code Scan")
+        : title.includes("QR Code Scan")
         ? "QR Code Scan"
-          : null;
+        : null;
 
       if (!scanType) {
         console.warn('Tipo de scan não encontrado no título:', title);
@@ -380,9 +400,6 @@ const ReportItem = ({ report, onPress }: { report: Report; onPress: (report: Rep
       const parts = title.split(scanType);
       const textTitle = parts[0]?.trim() || '';
       const dateStr = parts[1]?.trim() || '';
-
-      console.log('Text Title:', textTitle);
-      console.log('Date String:', dateStr);
       
       const formattedDate = formatDate(dateStr);
       return `${textTitle} ${scanType} ${formattedDate}`.trim();
@@ -391,7 +408,7 @@ const ReportItem = ({ report, onPress }: { report: Report; onPress: (report: Rep
       console.error('Erro ao formatar título do relatório:', error);
       return title;
     }
-  }
+  };
 
   return (
     <TouchableOpacity style={styles.reportCard} onPress={() => onPress(report)}>
@@ -429,6 +446,8 @@ export default function OrganizationDetailScreen() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   
+  const [assetsRFIDs, setAssetsRFIDs] = useState<AssetRFID[]>([]);
+  
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [loadingAssets, setLoadingAssets] = useState(false);
@@ -445,13 +464,13 @@ export default function OrganizationDetailScreen() {
   const organizationService = new OrganizationService();
   const assetsService = new AssetService();
   const reportService = new ReportService();
+  const attributeService = new AttributeService(); // ✅ Adicionar serviço
 
   useFocusEffect(
     useCallback(() => {
       const { tab, createAsset } = (route.params || {}) as any;
       
       if (tab !== undefined || createAsset !== undefined) {
-        
         if (tab !== undefined) setActiveTab(tab);
         if (createAsset !== undefined) setCreateAssetModalVisible(createAsset);
         
@@ -497,8 +516,6 @@ export default function OrganizationDetailScreen() {
       if (orgResponse) {
         console.log("Organização carregada:", orgResponse);
         setOrg(orgResponse);
-        
-        // Carregar membros por padrão (primeira tab)
         await fetchMembers();
       } else {
         setErrorMsg("Organização não encontrada.");
@@ -528,6 +545,48 @@ export default function OrganizationDetailScreen() {
     }
   }, [organizationId, membersLoaded]);
 
+  const extractAssetsRFIDs = useCallback(async (assetsList: Asset[]) => {
+    console.log('Extraindo RFIDs dos assets...');
+    const rfidsList: AssetRFID[] = [];
+
+    try {
+      for (const asset of assetsList) {
+        if (asset.trashBin) continue;
+
+        const assetInfo = await assetsService.getAssetInfo(asset.id);
+        const rfidAttributes = assetInfo.attributes.filter(
+          attr => attr.organizationId === organizationId &&
+            attr.type === "rfid"
+        )
+
+        for (const attribute of rfidAttributes) {
+          try {
+            const attributeDetails = await attributeService.getAttribute(attribute.id);
+            const rfidValue = attributeDetails.values.find(
+              (value) => value.assetInstanceId === asset.id
+            )?.value;
+
+            if (rfidValue) {
+              rfidsList.push({
+                assetId: asset.id,
+                assetName: asset.name,
+                rfidTag: rfidValue,
+              });
+              console.log(`RFID encontrado: ${asset.name} -> ${rfidValue}`);
+            }
+          } catch (error) {
+            console.error(`Erro ao buscar atributo ${attribute.id}:`, error);
+          }
+        }
+      }
+
+      console.log(`Total de RFIDs extraídos: ${rfidsList.length}`);
+      setAssetsRFIDs(rfidsList);
+    } catch (error) {
+      console.error('Erro ao extrair RFIDs:', error);
+    }
+  }, [organizationId, attributeService]);
+
   const fetchAssets = useCallback(async () => {
     if (!organizationId || assetsLoaded) return;
 
@@ -539,13 +598,15 @@ export default function OrganizationDetailScreen() {
       console.log("Ativos carregados:", activeAssets?.length || 0);
       setAssets(activeAssets || []);
       setAssetsLoaded(true);
+
+      await extractAssetsRFIDs(activeAssets || []);
     } catch (error) {
       console.error("Erro ao buscar ativos:", error);
       Alert.alert("Erro", "Falha ao carregar ativos");
     } finally {
       setLoadingAssets(false);
     }
-  }, [organizationId, assetsLoaded]);
+  }, [organizationId, assetsLoaded, extractAssetsRFIDs]);
 
   const fetchReports = useCallback(async () => {
     if (!organizationId || reportsLoaded) return;
@@ -564,14 +625,12 @@ export default function OrganizationDetailScreen() {
     }
   }, [organizationId, reportsLoaded]);
 
-  // Carregar organização inicial
   useEffect(() => {
     if (organizationId) {
       fetchOrganizationDetails();
     }
   }, [organizationId, fetchOrganizationDetails]);
 
-  // Carregar dados quando trocar de tab
   useEffect(() => {
     if (!organizationId || initialLoading) return;
 
@@ -608,8 +667,19 @@ export default function OrganizationDetailScreen() {
     }, [organizationId, activeTab, initialLoading])
   );
 
-  const handleAssetCreated = (newAsset: Asset) => {
-    setAssets(prevAssets => [newAsset, ...prevAssets]);
+  const handleAssetCreated = async () => {
+    try {
+      setAssetsLoaded(false);
+      const loadAssets = await assetsService.getOrganizationAssets(organizationId);
+      const activeAssets = loadAssets.filter(asset => !asset.trashBin);
+      setAssets(activeAssets ?? []);
+      
+      await extractAssetsRFIDs(activeAssets ?? []);
+      
+      setAssetsLoaded(true);
+    } catch (error) {
+      console.log(error);
+    }
   };
 
   const handleReportPress = (report: Report) => {
@@ -620,6 +690,14 @@ export default function OrganizationDetailScreen() {
     setActiveTab(tab);
   };
 
+  const handleAssetPress = (organizationId: string, assetId: string) => {
+    navigation.navigate('AssetDetails', { 
+      organizationId, 
+      assetId,
+      assetsRFIDs
+    });
+  };
+
   const renderHeader = () => {
     if (!org) return null;
     
@@ -628,12 +706,20 @@ export default function OrganizationDetailScreen() {
         <Text style={styles.title}>{org.name || 'Nome não disponível'}</Text>
         <Text style={styles.description}>{org.description || 'Sem descrição'}</Text>
         <Text style={styles.slug}>Slug: {org.slug || 'N/A'}</Text>
+
+        {assetsRFIDs.length > 0 && (
+          <View style={styles.rfidIndicator}>
+            <Feather name="radio" size={14} color="#2196F3" />
+            <Text style={styles.rfidIndicatorText}>
+              {assetsRFIDs.length} RFID{assetsRFIDs.length > 1 ? 's' : ''} cadastrado{assetsRFIDs.length > 1 ? 's' : ''}
+            </Text>
+          </View>
+        )}
       </View>
     );
   };
 
   const renderTabContent = () => {
-    // Tab de Membros
     if (activeTab === 'members') {
       if (loadingMembers) {
         return <SkeletonList count={6} />;
@@ -657,7 +743,6 @@ export default function OrganizationDetailScreen() {
       );
     }
 
-    // Tab de Relatórios
     if (activeTab === 'reports') {
       if (loadingReports) {
         return <SkeletonList count={4} />;
@@ -684,11 +769,6 @@ export default function OrganizationDetailScreen() {
       );
     }
 
-    // Tab de Ativos
-    const handleAssetPress = (organizationId: string, assetId: string) => {
-      navigation.navigate('AssetDetails', { organizationId, assetId });
-    };
-
     if (loadingAssets) {
       return <SkeletonList count={5} />;
     }
@@ -697,7 +777,7 @@ export default function OrganizationDetailScreen() {
       <View style={styles.assetsTabContainer}>
         <FlatList
           data={assets}
-          renderItem={({ item }) => <AssetItem item={item} onPress={handleAssetPress} />}
+          renderItem={({ item }) => <AssetItem item={item} assetsRfids={assetsRFIDs} onPress={handleAssetPress} />}
           keyExtractor={item => item.id}
           style={styles.tabContent}
           contentContainerStyle={{ paddingBottom: 20 }}
@@ -727,7 +807,6 @@ export default function OrganizationDetailScreen() {
     );
   };
 
-  // Loading inicial full-screen
   if (initialLoading) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -739,7 +818,6 @@ export default function OrganizationDetailScreen() {
     );
   }
 
-  // Erro full-screen
   if (errorMsg) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -842,7 +920,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  // Skeleton Styles
   skeletonContainer: {
     flex: 1,
     padding: 0,
@@ -898,6 +975,23 @@ const styles = StyleSheet.create({
     fontSize: 14, 
     color: '#888', 
     fontStyle: 'italic',
+  },
+  // ✅ Novo estilo para indicador de RFIDs
+  rfidIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    gap: 6,
+  },
+  rfidIndicatorText: {
+    fontSize: 12,
+    color: '#2196F3',
+    fontWeight: '600',
   },
   tabContainer: {
     flexDirection: 'row',
@@ -991,7 +1085,8 @@ const styles = StyleSheet.create({
   },
   assetMetadata: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
+    flexWrap: 'wrap',
   },
   assetType: {
     fontSize: 12,
@@ -1008,6 +1103,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 4,
+  },
+  // ✅ Novo badge RFID
+  rfidBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    gap: 4,
+  },
+  rfidBadgeText: {
+    fontSize: 10,
+    color: '#2196F3',
+    fontWeight: '600',
   },
   assetStatusBadge: {
     paddingHorizontal: 12,

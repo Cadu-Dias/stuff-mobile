@@ -47,3 +47,9 @@ export interface SelectedAssets {
     rfidTag: string;
   }>;
 }
+
+export interface AssetRFID {
+  assetId: string;
+  assetName: string;
+  rfidTag: string;
+}

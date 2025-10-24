@@ -17,7 +17,7 @@ interface BluetoothLowEnergyApi {
   checkNearbyDevicesPermission(): Promise<boolean>;
   testConnection(deviceAddress: string): Promise<boolean>;
   scanForPeripherals(): void;
-  cancelDiscovery(): void;
+  cancelDiscovery(): Promise<void>;
   connectToDevice: (deviceAddress: string) => Promise<void>;
   disconnectFromDevice: () => Promise<void>;
   connectedDevice: BluetoothDevice | null;
