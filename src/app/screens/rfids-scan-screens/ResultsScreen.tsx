@@ -314,8 +314,11 @@ const ResultsScreen = ({ route }: {
           
           <TouchableOpacity
             style={styles.finishButton}
-            onPress={() => navigation.navigate('MainTabs')}
-          >
+            onPress={() => navigation.reset({
+              index: 0,
+              routes: [{ name: 'MainTabs', params: { screen: "Scan" } }],
+            })}
+            >
             <Text style={styles.finishButtonText}>Concluir</Text>
             <Feather name="check" size={20} color="white" />
           </TouchableOpacity>

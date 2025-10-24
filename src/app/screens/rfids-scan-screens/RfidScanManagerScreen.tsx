@@ -55,7 +55,6 @@ const RFIDScanManagerScreen = () => {
     
     await AsyncStorage.removeItem("selected-rfid-assets");
 
-    // Navegar para tela de scan com os dados necessários
     navigation.navigate('StorageScan', { 
       deviceAddress: deviceInfo.address,
       selectedAssets 

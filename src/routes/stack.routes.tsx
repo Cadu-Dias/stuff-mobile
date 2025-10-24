@@ -71,11 +71,11 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
     },
     StorageScan: {
       screen: SCREENS.StorageScanScreen,
-      options: { title: "Rastreamento de Itens" },
+      options: { title: "Rastreamento de Itens", headerBackVisible: false },
     },
     ResultsScreen: {
       screen: SCREENS.ResultsScreen,
-      options: { title: ""}
+      options: { title: "", headerBackVisible: false }
     }
   },
 });
