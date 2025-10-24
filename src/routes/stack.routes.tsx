@@ -2,7 +2,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import { RootStackParamList } from '../app/models/stackType';
 import SCREENS from '../app/screens/screens';
 import TabRoutes from './tab.routes';
-import HeaderTitle from '../app/components/Header';
+import Header from '../app/components/header/Header';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>({
   initialRouteName: 'Login', 
@@ -11,7 +11,7 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
       backgroundColor: '#FFF0E0',
     },
     headerShadowVisible: false,
-    headerTitle: () => <HeaderTitle />,
+    headerTitle: () => <Header />,
     headerTitleAlign: 'center',
     headerTintColor: '#333',
   },
@@ -30,12 +30,16 @@ const RootStack = createNativeStackNavigator<RootStackParamList>({
     },
     MainTabs: {
       screen: TabRoutes,
+      options: {
+        headerBackVisible: false
+      }
     },
     OrganizationsScreen: {
       screen: SCREENS.OrganizationsScreen,
       options: () => ({
         title: 'Detalhes da Organização', 
-        headerBackTitle: undefined
+        headerBackTitle: undefined,
+        headerBackVisible: false,
       }),
     },
     AssetDetails: {

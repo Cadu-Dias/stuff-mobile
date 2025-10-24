@@ -61,7 +61,10 @@ const LoginScreen = () => {
             );
 
             setIsLogging(false);
-            navigator.navigate('OrganizationsScreen'); 
+            navigator.reset({
+                index: 0,
+                routes: [{ name: 'OrganizationsScreen'}],
+            });
         } catch (error: any) {
             console.log(error)
             setLoginError(error["message"]);

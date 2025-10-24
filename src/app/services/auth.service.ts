@@ -33,6 +33,17 @@ export class AuthService {
         }
     }
 
+    async logoutUser() {
+        try {
+            console.log("Realizando logout do usuário...");
+            await httpClient.post<{ message: string, data: any }>("/auth/logout", {});
+            
+        } catch (error) {
+            
+            throw new Error("Não foi possível sair da conta!");
+        }
+    }
+
     async requestPasswordReset(email: string) {
         try {
             console.log('Enviando e-mail para alterar a senha...');
