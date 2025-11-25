@@ -255,28 +255,24 @@ const PrintSelectionStep = ({
   );
 };
 
-// ============ ETAPA 3: SCANNING ============
+// ============ ETAPA 3: SCANNING - MODIFICADA ============
 interface ScanningStepProps {
   organization: Organization | null;
   selectedAssets: AssetWithSelection[];
-  currentAsset: AssetWithSelection | null;
-  onAssetScanned: (success: boolean) => void;
-  onSelectAsset: (asset: AssetWithSelection) => void;
+  onAssetScanned: (assetId: string, success: boolean) => void;
   onFinish: () => void;
-  scanning: boolean;
 }
 
 const ScanningStep = ({ 
   organization,
   selectedAssets, 
-  currentAsset,
   onAssetScanned,
-  onSelectAsset,
   onFinish,
-  scanning
 }: ScanningStepProps) => {
+  const [scanning, setScanning] = useState(false);
   const scannedCount = selectedAssets.filter(a => a.scanned).length;
   const progress = (scannedCount / selectedAssets.length) * 100;
+  const pendingAssets = selectedAssets.filter(a => !a.scanned);
 
   return (
     <View style={styles.stepContainer}>
@@ -288,7 +284,7 @@ const ScanningStep = ({
             </View>
             <Text style={styles.stepTitle}>Escanear QR Codes</Text>
             <Text style={styles.stepSubtitle}>
-              Selecione um ativo para escanear seu QR Code
+              Abra a câmera e escaneie os QR Codes dos ativos
             </Text>
           </View>
 
@@ -307,14 +303,12 @@ const ScanningStep = ({
 
           <ScrollView style={styles.assetList} showsVerticalScrollIndicator={false}>
             {selectedAssets.map((asset) => (
-              <TouchableOpacity
+              <View
                 key={asset.id}
                 style={[
                   styles.scanAssetCard,
                   asset.scanned && styles.scanAssetCardScanned
                 ]}
-                onPress={() => !asset.scanned && onSelectAsset(asset)}
-                disabled={asset.scanned}
               >
                 <View style={styles.scanAssetIcon}>
                   {asset.scanned ? (
@@ -332,20 +326,28 @@ const ScanningStep = ({
                     {asset.name}
                   </Text>
                   <Text style={styles.assetDescription}>
-                    {asset.scanned ? 'Escaneado com sucesso' : 'Toque para escanear'}
+                    {asset.scanned ? 'Escaneado com sucesso' : 'Aguardando scan'}
                   </Text>
                 </View>
 
                 <View style={styles.assetArrow}>
-                  {!asset.scanned && (
-                    <Feather name="camera" size={20} color="#F4A64E" />
+                  {asset.scanned && (
+                    <Feather name="check" size={20} color="#5ECC63" />
                   )}
                 </View>
-              </TouchableOpacity>
+              </View>
             ))}
           </ScrollView>
 
           <View style={styles.stepActions}>
+            <TouchableOpacity
+              style={styles.openCameraButton}
+              onPress={() => setScanning(true)}
+            >
+              <MaterialCommunityIcons name="camera" size={20} color="white" />
+              <Text style={styles.openCameraButtonText}>Abrir Câmera</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.finishButton}
               onPress={onFinish}
@@ -360,24 +362,31 @@ const ScanningStep = ({
       ) : (
         <ScannerCamera
           organization={organization}
-          asset={currentAsset!}
+          assets={selectedAssets}
+          pendingAssets={pendingAssets}
           onScanned={onAssetScanned}
+          onClose={() => setScanning(false)}
         />
       )}
     </View>
   );
 };
 
-// ============ CÂMERA DE SCAN ============
+// ============ CÂMERA DE SCAN - MODIFICADA ============
 interface ScannerCameraProps {
   organization: Organization | null;
-  asset: AssetWithSelection;
-  onScanned: (success: boolean) => void;
+  assets: AssetWithSelection[];
+  pendingAssets: AssetWithSelection[];
+  onScanned: (assetId: string, success: boolean) => void;
+  onClose: () => void;
 }
 
-const ScannerCamera = ({ organization, asset, onScanned }: ScannerCameraProps) => {
+const ScannerCamera = ({ organization, assets, pendingAssets, onScanned, onClose }: ScannerCameraProps) => {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
+  const [showAlert, setShowAlert] = useState(false);
+  const [foundAsset, setFoundAsset] = useState<AssetWithSelection | null>(null);
+  const [alertType, setAlertType] = useState<'success' | 'error'>('success');
 
   useEffect(() => {
     getCameraPermissions();
@@ -389,38 +398,64 @@ const ScannerCamera = ({ organization, asset, onScanned }: ScannerCameraProps) =
   };
 
   const handleBarcodeScanned = ({ data }: any) => {
-    if (!scanned && organization) {
-      setScanned(true);
-      const expectedValue = `${organization.id}|${asset.id}`;
+    if (scanned || !organization) return;
+
+    setScanned(true);
+
+    // Extrair organizationId e assetId do QR Code
+    const [scannedOrgId, scannedAssetId] = data.split('|');
+
+    // Verificar se a organização corresponde
+    if (scannedOrgId !== organization.id) {
+      setAlertType('error');
+      setFoundAsset(null);
+      setShowAlert(true);
       
-      if (data === expectedValue) {
-        Alert.alert(
-          'QR Code Válido! ✓',
-          `O QR Code do ativo "${asset.name}" foi escaneado com sucesso.`,
-          [
-            {
-              text: 'OK',
-              onPress: () => onScanned(true),
-            },
-          ]
-        );
-      } else {
-        Alert.alert(
-          'QR Code Inválido',
-          `Este QR Code não corresponde ao ativo "${asset.name}".\n\nEsperado: ${asset.name}\nRecebido: ${data}`,
-          [
-            {
-              text: 'Tentar Novamente',
-              onPress: () => setScanned(false),
-            },
-            {
-              text: 'Cancelar',
-              style: 'cancel',
-              onPress: () => onScanned(false),
-            },
-          ]
-        );
+      setTimeout(() => {
+        setShowAlert(false);
+        setScanned(false);
+      }, 2000);
+      return;
+    }
+
+    // Procurar o ativo nos ativos selecionados
+    const asset = assets.find(a => a.id === scannedAssetId);
+
+    if (asset) {
+      // Verificar se já foi escaneado
+      if (asset.scanned) {
+        setAlertType('error');
+        setFoundAsset(asset);
+        setShowAlert(true);
+        
+        setTimeout(() => {
+          setShowAlert(false);
+          setScanned(false);
+        }, 2000);
+        return;
       }
+
+      // Ativo encontrado e não escaneado ainda
+      setAlertType('success');
+      setFoundAsset(asset);
+      setShowAlert(true);
+      onScanned(asset.id, true);
+
+      setTimeout(() => {
+        setShowAlert(false);
+        setFoundAsset(null);
+        setScanned(false);
+      }, 2000);
+    } else {
+      // Ativo não está na lista de selecionados
+      setAlertType('error');
+      setFoundAsset(null);
+      setShowAlert(true);
+
+      setTimeout(() => {
+        setShowAlert(false);
+        setScanned(false);
+      }, 2000);
     }
   };
 
@@ -449,16 +484,19 @@ const ScannerCamera = ({ organization, asset, onScanned }: ScannerCameraProps) =
 
   return (
     <View style={styles.cameraContainer}>
+      {/* Header da Câmera */}
       <View style={styles.cameraScanHeader}>
         <TouchableOpacity 
           style={styles.cameraBackButton}
-          onPress={() => onScanned(false)}
+          onPress={onClose}
         >
           <Feather name="x" size={24} color="white" />
         </TouchableOpacity>
         <View style={styles.cameraScanInfo}>
-          <Text style={styles.cameraScanTitle}>{asset.name}</Text>
-          <Text style={styles.cameraScanSubtitle}>Escaneie o QR Code deste ativo</Text>
+          <Text style={styles.cameraScanTitle}>Escanear QR Codes</Text>
+          <Text style={styles.cameraScanSubtitle}>
+            {pendingAssets.length} ativo(s) pendente(s)
+          </Text>
         </View>
       </View>
 
@@ -487,6 +525,7 @@ const ScannerCamera = ({ organization, asset, onScanned }: ScannerCameraProps) =
           <View style={styles.unfocusedContainer}></View>
         </View>
         
+        {/* Instrução */}
         <View style={styles.instructionContainer}>
           <View style={styles.instructionBox}>
             <MaterialCommunityIcons name="qrcode-scan" size={24} color="white" />
@@ -495,6 +534,65 @@ const ScannerCamera = ({ organization, asset, onScanned }: ScannerCameraProps) =
             </Text>
           </View>
         </View>
+
+        {/* Lista de Ativos Pendentes */}
+        {pendingAssets.length > 0 && (
+          <View style={styles.pendingAssetsContainer}>
+            <View style={styles.pendingAssetsHeader}>
+              <MaterialCommunityIcons name="clipboard-list" size={20} color="white" />
+              <Text style={styles.pendingAssetsTitle}>
+                Pendentes ({pendingAssets.length})
+              </Text>
+            </View>
+            <ScrollView 
+              style={styles.pendingAssetsList}
+              showsVerticalScrollIndicator={false}
+            >
+              {pendingAssets.map((asset) => (
+                <View key={asset.id} style={styles.pendingAssetItem}>
+                  <Feather name="circle" size={8} color="#FF9800" />
+                  <Text style={styles.pendingAssetText} numberOfLines={1}>
+                    {asset.name}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Alerta Estilizado */}
+        {showAlert && (
+          <View style={styles.scanAlertContainer}>
+            <View style={[
+              styles.scanAlert,
+              alertType === 'success' ? styles.scanAlertSuccess : styles.scanAlertError
+            ]}>
+              <View style={styles.scanAlertIcon}>
+                {alertType === 'success' ? (
+                  <Feather name="check-circle" size={32} color="white" />
+                ) : (
+                  <Feather name="x-circle" size={32} color="white" />
+                )}
+              </View>
+              <View style={styles.scanAlertContent}>
+                <Text style={styles.scanAlertTitle}>
+                  {alertType === 'success' 
+                    ? 'Ativo Encontrado!' 
+                    : foundAsset?.scanned 
+                      ? 'Já Escaneado' 
+                      : 'QR Code Inválido'}
+                </Text>
+                <Text style={styles.scanAlertMessage}>
+                  {alertType === 'success' && foundAsset
+                    ? `${foundAsset.name} foi escaneado com sucesso`
+                    : foundAsset?.scanned
+                      ? `${foundAsset.name} já foi escaneado anteriormente`
+                      : 'Este QR Code não corresponde a nenhum ativo selecionado'}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
       </CameraView>
     </View>
   );
@@ -507,7 +605,7 @@ interface ResultsStepProps {
   onScanAgain: () => void;
 }
 
-const ResultsStep = ({ selectedAssets, organization, onFinish, onScanAgain,  }: ResultsStepProps) => {
+const ResultsStep = ({ selectedAssets, organization, onFinish, onScanAgain }: ResultsStepProps) => {
   const scannedCount = selectedAssets.filter(a => a.scanned).length;
   const totalCount = selectedAssets.length;
   const successRate = (scannedCount / totalCount) * 100;
@@ -517,7 +615,7 @@ const ResultsStep = ({ selectedAssets, organization, onFinish, onScanAgain,  }: 
 
   useEffect(() => {
     uploadScanResult();
-  }, [])
+  }, []);
 
   const uploadScanResult = async () => {
     try {
@@ -667,12 +765,10 @@ const QRCodeReaderScreen = () => {
   const [currentStep, setCurrentStep] = useState<Step>('asset-selection');
   const [loading, setLoading] = useState(true);
   const [printing, setPrinting] = useState(false);
-  const [scanning, setScanning] = useState(false);
   
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [assets, setAssets] = useState<AssetWithSelection[]>([]);
   const [assetsToPrint, setAssetsToPrint] = useState<Set<string>>(new Set());
-  const [currentScanAsset, setCurrentScanAsset] = useState<AssetWithSelection | null>(null);
 
   const assetService = new AssetService();
   const organizationService = new OrganizationService();
@@ -813,21 +909,13 @@ const QRCodeReaderScreen = () => {
     setCurrentStep('scanning');
   };
 
-  const handleSelectAssetToScan = (asset: AssetWithSelection) => {
-    setCurrentScanAsset(asset);
-    setScanning(true);
-  };
-
-  const handleAssetScanned = (success: boolean) => {
-    if (success && currentScanAsset) {
+  const handleAssetScanned = (assetId: string, success: boolean) => {
+    if (success) {
       const scanDate = new Date();
       setAssets(prev => prev.map(a => 
-        a.id === currentScanAsset.id ? { ...a, scanDate: scanDate.toISOString(), scanned: true } : a
+        a.id === assetId ? { ...a, scanDate: scanDate.toISOString(), scanned: true } : a
       ));
     }
-    
-    setScanning(false);
-    setCurrentScanAsset(null);
   };
 
   const handleFinishScanning = () => {
@@ -897,11 +985,8 @@ const QRCodeReaderScreen = () => {
         <ScanningStep
           organization={organization}
           selectedAssets={selectedAssets}
-          currentAsset={currentScanAsset}
           onAssetScanned={handleAssetScanned}
-          onSelectAsset={handleSelectAssetToScan}
           onFinish={handleFinishScanning}
-          scanning={scanning}
         />
       )}
 
@@ -1218,6 +1303,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  openCameraButton: {
+    backgroundColor: '#2196F3',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  openCameraButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 
   // Progress
   progressContainer: {
@@ -1395,6 +1494,97 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+
+  // Lista de Ativos Pendentes na Câmera
+  pendingAssetsContainer: {
+    position: 'absolute',
+    top: 80,
+    right: 16,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 12,
+    padding: 12,
+    maxHeight: 200,
+    width: 180,
+  },
+  pendingAssetsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.2)',
+  },
+  pendingAssetsTitle: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  pendingAssetsList: {
+    maxHeight: 140,
+  },
+  pendingAssetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  pendingAssetText: {
+    color: 'white',
+    fontSize: 12,
+    flex: 1,
+  },
+
+  // Alerta Estilizado
+  scanAlertContainer: {
+    position: 'absolute',
+    top: '50%',
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    transform: [{ translateY: -50 }],
+  },
+  scanAlert: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    borderRadius: 16,
+    gap: 16,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  scanAlertSuccess: {
+    backgroundColor: '#5ECC63',
+  },
+  scanAlertError: {
+    backgroundColor: '#F44336',
+  },
+  scanAlertIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scanAlertContent: {
+    flex: 1,
+  },
+  scanAlertTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  scanAlertMessage: {
+    color: 'white',
+    fontSize: 14,
+    lineHeight: 20,
   },
 
   // Results

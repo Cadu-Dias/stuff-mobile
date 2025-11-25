@@ -13,13 +13,15 @@ import RFIDScanManagerScreen from "./rfids-scan-screens/RfidScanManagerScreen";
 import AssetSelectionScreen from "./assets-screens/AssetSelectionScreen";
 import ReportDetailScreen from "./reports/ReportDetailScreen";
 import ForgotPasswordScreen from "./auth-screens/ForgotPasswordScreen";
+import AIAssetCreationScreen from "./ai-screens/AiAssetCreationScreen";
 
 const SCREENS = { 
     HomeScreen, StorageScanScreen, DeviceDiscovery, 
     LoginScreen, ResultsScreen, ProfileScreen, OrganizationsScreen,
     OrganizationDetailScreen, ScanScreen, QRCodeReaderScreen, 
     AssetDetailScreen, RFIDScanManagerScreen, 
-    AssetSelectionScreen, ReportDetailScreen, ForgotPasswordScreen
+    AssetSelectionScreen, ReportDetailScreen, ForgotPasswordScreen,
+    AIAssetCreationScreen
 }
 
 export default SCREENS

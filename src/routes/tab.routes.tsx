@@ -1,5 +1,5 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
-import { Feather } from '@expo/vector-icons'
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons'
 import SCREENS from '../app/screens/screens'
 
 const Tab = createBottomTabNavigator();
@@ -42,6 +42,14 @@ const TabRoutes = () => {
                 options={{
                     tabBarIcon: ({ color, size }) => <Feather name='user' color={color} size={size} />,
                     tabBarLabel: 'Conta'
+                }}
+            />
+            <Tab.Screen 
+                name='AI'
+                component={SCREENS.AIAssetCreationScreen}
+                options={{
+                    tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name='robot' color={color} size={size} />,
+                    tabBarLabel: 'IA'
                 }}
             />
         </Tab.Navigator>
