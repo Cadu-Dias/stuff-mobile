@@ -77,12 +77,20 @@ const Header = () => {
       tabScreen: 'Organization',
     },
     {
+      label: 'Inteligência Artificial',
+      icon: 'robot',
+      iconFamily: 'MaterialCommunity',
+      route: 'MainTabs',
+      params: { screen: "AI" },
+      tabScreen: 'AI'
+    },
+    {
       label: 'Perfil',
       icon: 'user',
       iconFamily: 'Feather',
       route: 'MainTabs',
       params: { screen: "Profile" },
-      tabScreen: 'Profile', // ✅ Identificador
+      tabScreen: 'Profile'
     },
   ];
 
