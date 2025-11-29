@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet, View, Text, SafeAreaView, FlatList,
   ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, ScrollView
@@ -36,7 +36,6 @@ const SkeletonList = ({ count = 5 }: { count?: number }) => (
   </View>
 );
 
-// Modal de criar ativo (sem alterações)
 const CreateAssetModal = ({ 
   visible, 
   onClose, 
@@ -464,7 +463,16 @@ export default function OrganizationDetailScreen() {
   const organizationService = new OrganizationService();
   const assetsService = new AssetService();
   const reportService = new ReportService();
-  const attributeService = new AttributeService(); // ✅ Adicionar serviço
+  const attributeService = new AttributeService();
+
+  const sortedReports = useMemo(() => {
+    return [...reports].sort((a, b) => {
+      const dateA = new Date(a.createdAt).getTime();
+      const dateB = new Date(b.createdAt).getTime();
+      return dateB - dateA;
+    });
+  }, [reports]);
+
 
   useFocusEffect(
     useCallback(() => {
@@ -750,7 +758,7 @@ export default function OrganizationDetailScreen() {
 
       return (
         <FlatList
-          data={reports}
+          data={sortedReports}
           renderItem={({ item }) => <ReportItem report={item} onPress={handleReportPress} />}
           keyExtractor={item => item.id}
           style={styles.tabContent}

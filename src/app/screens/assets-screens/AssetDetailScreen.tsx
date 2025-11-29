@@ -16,7 +16,6 @@ import { AttributeService } from '../../services/attribute.service';
 import useBLE from '../../hooks/useBle';
 import { BluetoothDevice } from 'react-native-bluetooth-classic';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { OrganizationService } from '../../services/organization.service';
 
 const ATTRIBUTE_TYPES = {
     number: 'Número',
@@ -35,7 +34,7 @@ interface RFIDScanModalProps {
   visible: boolean;
   onClose: () => void;
   onRFIDScanned: (rfid: string) => void;
-  existingRFIDs?: Array<{ assetId: string; assetName: string; rfidTag: string }>; //  Novo parâmetro
+  existingRFIDs?: Array<{ assetId: string; assetName: string; rfidTag: string }>;
 }
 
 const RFIDScanModal = ({ 
@@ -2161,7 +2160,7 @@ export default function AssetDetailScreen() {
                 type: newAttribute.type,
                 unit: newAttribute.unit || null,
                 timeUnit: newAttribute.timeUnit || null,
-                options: "sdsdsddssdsd",
+                options: "",
                 required: newAttribute.required || false
             });
 

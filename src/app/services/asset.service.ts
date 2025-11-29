@@ -41,11 +41,11 @@ export class AssetService {
 
     public async createAsset(assetProp: Pick<Asset, 'name' | 'type' | 'organizationId' | 'description' | 'quantity'>): Promise<Asset> {
         try {
-            const response = await httpClient.post<{ data: Asset[]; message: string }>(
+            const response = await httpClient.post<{ data: Asset; message: string }>(
                 '/assets',
                 assetProp
             );
-            return response.data.data[0];
+            return response.data.data;
         } catch (error) {
             console.error('Erro ao criar asset:', error);
             throw error;
