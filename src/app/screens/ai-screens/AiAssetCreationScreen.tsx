@@ -19,34 +19,55 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AIFuncionalitiesService } from '../../services/ai-functionalities.service';
 import { AssetService } from '../../services/asset.service';
 import { AttributeService } from '../../services/attribute.service';
+import uuid from 'react-native-uuid';
 
-type Step = 'image-selection' | 'processing' | 'review' | 'creating' | 'success';
+const themeColors = {
+  background: '#F4A64E',
+  mainBackground: '#FFF0E0',
+  text: '#333333',
+  primary: '#F4A64E',
+  secondary: '#2196F3',
+  success: '#5ECC63',
+  warning: '#FF9800',
+  dark: '#333333',
+  mid: '#555555',
+  light: '#666666',
+  cardBackground: 'white',
+};
+
+type Step = 'image-selection' | 'context' | 'processing' | 'review' | 'creating' | 'success';
 
 interface DetectedAsset {
   name: string;
   description: string;
   attributes: Record<string, AttributeData>;
   selected: boolean;
-  editing?: boolean;
 }
 
 interface AttributeData {
   type: 'number' | 'text' | 'metric' | 'boolean' | 'date' | 'selection' | 'multiselection' | 'timemetric';
   value: any;
   unit?: string;
-  timeUnit?: string;
+  timeunit?: string;
   options?: string[];
+}
+
+interface SelectedImage {
+  id: string;
+  uri: string;
+  base64: string;
+  context?: string;
 }
 
 const AIAssetCreationScreen = () => {
   const [currentStep, setCurrentStep] = useState<Step>('image-selection');
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [detectedAssets, setDetectedAssets] = useState<Record<string, DetectedAsset>>({});
   const [processing, setProcessing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [organizationId, setOrganizationId] = useState<string>('');
   const [showCameraModal, setShowCameraModal] = useState(false);
-  const [editingAsset, setEditingAsset] = useState<string | null>(null);
+  const [globalContext, setGlobalContext] = useState<string>('');
 
   const aiService = new AIFuncionalitiesService();
   const assetService = new AssetService();
@@ -74,7 +95,7 @@ const AIAssetCreationScreen = () => {
   const pickImageFromGallery = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: "images",
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
@@ -82,7 +103,13 @@ const AIAssetCreationScreen = () => {
       });
 
       if (!result.canceled && result.assets[0].base64) {
-        setSelectedImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
+        const newImage: SelectedImage = {
+          id: Date.now().toString(),
+          uri: result.assets[0].uri,
+          base64: result.assets[0].base64,
+          context: '',
+        };
+        setSelectedImages(prev => [...prev, newImage]);
       }
     } catch (error) {
       console.error('Erro ao selecionar imagem:', error);
@@ -94,44 +121,92 @@ const AIAssetCreationScreen = () => {
     setShowCameraModal(true);
   };
 
-  const handleCameraCapture = async (photoBase64: string) => {
-    setSelectedImage(`data:image/jpeg;base64,${photoBase64}`);
+  const handleCameraCapture = async (photoBase64: string, photoUri: string) => {
+    const newImage: SelectedImage = {
+      id: Date.now().toString(),
+      uri: photoUri,
+      base64: photoBase64,
+      context: '',
+    };
+    setSelectedImages(prev => [...prev, newImage]);
     setShowCameraModal(false);
   };
 
-  const processImage = async () => {
-    if (!selectedImage) {
-      Alert.alert('Erro', 'Selecione uma imagem primeiro');
+  const removeImage = (imageId: string) => {
+    setSelectedImages(prev => prev.filter(img => img.id !== imageId));
+  };
+
+  const updateImageContext = (imageId: string, context: string) => {
+    setSelectedImages(prev =>
+      prev.map(img => (img.id === imageId ? { ...img, context } : img))
+    );
+  };
+
+  const proceedToContext = () => {
+    if (selectedImages.length === 0) {
+      Alert.alert('Aviso', 'Selecione pelo menos uma imagem');
       return;
     }
+    setCurrentStep('context');
+  };
 
+  const processImages = async () => {
     setProcessing(true);
     setCurrentStep('processing');
 
     try {
-      const base64Data = selectedImage.split(',')[1];
-      const result = await aiService.describeImage(base64Data);
+      const allDetectedAssets: Record<string, DetectedAsset> = {};
+      
+      for (const image of selectedImages) {
+        try {
+          const generatedUUID = uuid.v4();
+          const { key, url } = await aiService.generatePresignedUrl(
+            `${organizationId}_scan_${generatedUUID}.png`
+          );
+          await aiService.uploadImageBase64(url, image.base64);
 
-      if (result && Object.keys(result).length > 0) {
-        const assetsWithSelection: Record<string, DetectedAsset> = {};
-        
-        Object.keys(result).forEach((assetName) => {
-          assetsWithSelection[assetName] = {
-            ...result[assetName],
-            name: assetName,
-            selected: true,
-          };
-        });
+          let combinedContext = '';
+          if (globalContext.trim()) {
+            combinedContext += globalContext.trim();
+          }
+          if (image.context?.trim()) {
+            combinedContext += (combinedContext ? '. ' : '') + image.context.trim();
+          }
 
-        setDetectedAssets(assetsWithSelection);
+          const result = await aiService.describeImage(key, combinedContext);
+
+          if (result && Object.keys(result).length > 0) {
+            Object.keys(result).forEach((assetName: any) => {
+              let uniqueName = assetName as string;
+              let counter = 1;
+              while (allDetectedAssets[uniqueName]) {
+                uniqueName = `${assetName} ${counter}`;
+                counter++;
+              }
+
+              allDetectedAssets[uniqueName] = {
+                ...result[assetName],
+                name: uniqueName,
+                selected: true,
+              };
+            });
+          }
+        } catch (error: any) {
+          console.error('Erro ao processar imagem:', error['message']);
+        }
+      }
+
+      if (Object.keys(allDetectedAssets).length > 0) {
+        console.log(allDetectedAssets);
+        setDetectedAssets(allDetectedAssets);
         setCurrentStep('review');
       } else {
-        Alert.alert('Aviso', 'Nenhum ativo foi detectado na imagem');
+        Alert.alert('Aviso', 'Nenhum ativo foi detectado nas imagens');
         setCurrentStep('image-selection');
       }
     } catch (error) {
-      console.error('Erro ao processar imagem:', error);
-      Alert.alert('Erro', 'Não foi possível processar a imagem. Tente novamente.');
+      console.error('Erro ao processar imagens:', error);
+      Alert.alert('Erro', 'Não foi possível processar as imagens. Tente novamente.');
       setCurrentStep('image-selection');
     } finally {
       setProcessing(false);
@@ -177,64 +252,88 @@ const AIAssetCreationScreen = () => {
     setCreating(true);
     setCurrentStep('creating');
 
+    const fixAttributeType = (attributeType: string) => {
+      switch(attributeType) {
+        case 'selection':
+          return 'select'
+        case 'numeric': 
+          return 'number'
+        case 'textual':
+          return 'text'
+        default:
+          return attributeType
+      }
+    }
+
     try {
       let successCount = 0;
       let errorCount = 0;
 
       for (const asset of selectedAssetsList) {
         try {
-          // Criar o ativo
           const createdAsset = await assetService.createAsset({
             name: asset.name,
+            type: 'replicable',
             description: asset.description,
-            type: 'object',
             organizationId: organizationId,
             quantity: 1,
           });
 
-          // Criar os atributos
           for (const [attrName, attrData] of Object.entries(asset.attributes)) {
             try {
               const attributePayload: any = {
-                assetId: createdAsset.id,
+                organizationId: organizationId,
+                authorId: createdAsset.creatorUserId,
                 name: attrName,
-                type: attrData.type,
-              };
-
-              // Adicionar campos específicos baseado no tipo
-              if (attrData.type === 'selection' || attrData.type === 'multiselection') {
-                attributePayload.options = attrData.options?.join(',');
+                description: attrName,
+                type: fixAttributeType(attrData.type),
+                required: false,
               }
 
-              const createdAttribute = await attributeService.createAttribute(attributePayload);
 
-              // Criar o valor do atributo
-              const valuePayload: any = {
-                assetId: createdAsset.id,
-                value: attrData.value,
-              };
+              if (attrData.type === 'selection' || attrData.type === 'multiselection') {
+                attributePayload.options = attrData.options?.join(',') || '';
+              } else {
+                attributePayload.options = '';
+              }
 
               if (attrData.type === 'metric' && attrData.unit) {
-                valuePayload.metricUnit = attrData.unit;
+                attributePayload.unit = attrData.unit;
+              } else {
+                attributePayload.unit = '';
               }
 
-              if (attrData.type === 'timemetric' && attrData.timeUnit) {
-                valuePayload.timeUnit = attrData.timeUnit;
+              if (attrData.type === 'timemetric' && attrData.timeunit) {
+                attributePayload.timeUnit = attrData.timeunit;
+              } else {
+                attributePayload.timeUnit = '';
               }
+              console.log('Criando atributo:', attrName, attributePayload);
+
+              const createdAttribute = await attributeService.createAttribute(attributePayload);
+              const valuePayload: any = {
+                assetId: createdAsset.id,
+                value: String(attrData.value)
+              };
+
+              console.log('Criando valor do atributo:', attrName, valuePayload);
 
               await attributeService.createAttributeValue(
                 createdAttribute.id,
                 createdAsset.id,
                 valuePayload.value
               );
-            } catch (attrError) {
-              console.error(`Erro ao criar atributo ${attrName}:`, attrError);
+
+            } catch (attrError: any) {
+              console.error(`Erro ao criar atributo ${attrName}:`, attrError?.response?.data || attrError?.message || attrError);
             }
           }
 
           successCount++;
-        } catch (assetError) {
-          console.error(`Erro ao criar ativo ${asset.name}:`, assetError);
+          console.log(`Ativo ${asset.name} criado com sucesso`);
+
+        } catch (assetError: any) {
+          console.error(`Erro ao criar ativo ${asset.name}:`, assetError?.response?.data || assetError?.message || assetError);
           errorCount++;
         }
       }
@@ -253,8 +352,9 @@ const AIAssetCreationScreen = () => {
           ]
         );
       }, 1000);
-    } catch (error) {
-      console.error('Erro ao criar ativos:', error);
+
+    } catch (error: any) {
+      console.error('Erro ao criar ativos:', error?.response?.data || error?.message || error);
       Alert.alert('Erro', 'Não foi possível criar os ativos');
       setCurrentStep('review');
     } finally {
@@ -262,20 +362,23 @@ const AIAssetCreationScreen = () => {
     }
   };
 
+
   const resetScreen = () => {
     setCurrentStep('image-selection');
-    setSelectedImage(null);
+    setSelectedImages([]);
     setDetectedAssets({});
     setProcessing(false);
     setCreating(false);
+    setGlobalContext('');
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
+    <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <View style={styles.headerContent}>
-          <MaterialCommunityIcons name="brain" size={28} color="#F4A64E" />
+          <View style={styles.headerIcon}>
+            <MaterialCommunityIcons name="brain" size={24} color="white" />
+          </View>
           <View style={styles.headerTextContainer}>
             <Text style={styles.headerTitle}>Criação com IA</Text>
             <Text style={styles.headerSubtitle}>Detecte ativos através de imagens</Text>
@@ -283,41 +386,46 @@ const AIAssetCreationScreen = () => {
         </View>
       </View>
 
-      {/* Steps */}
-      {currentStep === 'image-selection' && (
-        <ImageSelectionStep
-          selectedImage={selectedImage}
-          onPickFromGallery={pickImageFromGallery}
-          onTakePhoto={takePhotoWithCamera}
-          onProcess={processImage}
-          onReset={() => setSelectedImage(null)}
-        />
-      )}
+      <View style={styles.main}>
+        {currentStep === 'image-selection' && (
+          <ImageSelectionStep
+            selectedImages={selectedImages}
+            onPickFromGallery={pickImageFromGallery}
+            onTakePhoto={takePhotoWithCamera}
+            onRemoveImage={removeImage}
+            onContinue={proceedToContext}
+          />
+        )}
 
-      {currentStep === 'processing' && (
-        <ProcessingStep />
-      )}
+        {currentStep === 'context' && (
+          <ContextStep
+            selectedImages={selectedImages}
+            globalContext={globalContext}
+            onUpdateGlobalContext={setGlobalContext}
+            onUpdateImageContext={updateImageContext}
+            onProcess={processImages}
+            onBack={() => setCurrentStep('image-selection')}
+          />
+        )}
 
-      {currentStep === 'review' && (
-        <ReviewStep
-          detectedAssets={detectedAssets}
-          onToggleAsset={toggleAssetSelection}
-          onUpdateName={updateAssetName}
-          onUpdateDescription={updateAssetDescription}
-          onCreate={createAssets}
-          onBack={resetScreen}
-        />
-      )}
+        {currentStep === 'processing' && <ProcessingStep />}
 
-      {currentStep === 'creating' && (
-        <CreatingStep />
-      )}
+        {currentStep === 'review' && (
+          <ReviewStep
+            detectedAssets={detectedAssets}
+            onToggleAsset={toggleAssetSelection}
+            onUpdateName={updateAssetName}
+            onUpdateDescription={updateAssetDescription}
+            onCreate={createAssets}
+            onBack={resetScreen}
+          />
+        )}
 
-      {currentStep === 'success' && (
-        <SuccessStep onFinish={resetScreen} />
-      )}
+        {currentStep === 'creating' && <CreatingStep />}
 
-      {/* Camera Modal */}
+        {currentStep === 'success' && <SuccessStep onFinish={resetScreen} />}
+      </View>
+
       <CameraModal
         visible={showCameraModal}
         onClose={() => setShowCameraModal(false)}
@@ -329,103 +437,243 @@ const AIAssetCreationScreen = () => {
 
 // ============ STEP 1: IMAGE SELECTION ============
 interface ImageSelectionStepProps {
-  selectedImage: string | null;
+  selectedImages: SelectedImage[];
   onPickFromGallery: () => void;
   onTakePhoto: () => void;
-  onProcess: () => void;
-  onReset: () => void;
+  onRemoveImage: (imageId: string) => void;
+  onContinue: () => void;
 }
 
 const ImageSelectionStep = ({
-  selectedImage,
+  selectedImages,
   onPickFromGallery,
   onTakePhoto,
-  onProcess,
-  onReset,
+  onRemoveImage,
+  onContinue,
 }: ImageSelectionStepProps) => {
   return (
-    <View style={styles.stepContainer}>
-      <View style={styles.stepHeader}>
-        <View style={styles.stepIconContainer}>
-          <MaterialCommunityIcons name="image-plus" size={28} color="#F4A64E" />
+    <ScrollView style={styles.stepContainer} showsVerticalScrollIndicator={false}>
+      <View style={styles.welcomeCard}>
+        <View style={styles.welcomeContent}>
+          <Text style={styles.welcomeTitle}>Análise Inteligente</Text>
+          <Text style={styles.welcomeSubtitle}>
+            Adicione fotos de objetos e nossa IA irá detectar e criar ativos automaticamente
+          </Text>
         </View>
-        <Text style={styles.stepTitle}>Selecione uma Imagem</Text>
-        <Text style={styles.stepSubtitle}>
-          Escolha uma foto da galeria ou tire uma foto do objeto
-        </Text>
+        <View style={styles.welcomeIconContainer}>
+          <MaterialCommunityIcons name="image-auto-adjust" size={32} color="#F4A64E" />
+        </View>
       </View>
 
-      {!selectedImage ? (
-        <View style={styles.imageSelectionContainer}>
-          <TouchableOpacity style={styles.imageOptionCard} onPress={onPickFromGallery}>
-            <View style={styles.imageOptionIcon}>
-              <Feather name="image" size={48} color="#2196F3" />
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Adicionar Imagens</Text>
+        <View style={styles.imageOptionsContainer}>
+          <TouchableOpacity style={styles.imageOptionButton} onPress={onPickFromGallery}>
+            <View style={[styles.imageOptionIcon, { backgroundColor: '#E3F2FD' }]}>
+              <Feather name="image" size={24} color="#2196F3" />
             </View>
-            <Text style={styles.imageOptionTitle}>Galeria</Text>
-            <Text style={styles.imageOptionDescription}>
-              Selecione uma foto da sua galeria
-            </Text>
+            <Text style={styles.imageOptionText}>Galeria</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.imageOptionCard} onPress={onTakePhoto}>
-            <View style={styles.imageOptionIcon}>
-              <Feather name="camera" size={48} color="#5ECC63" />
+          <TouchableOpacity style={styles.imageOptionButton} onPress={onTakePhoto}>
+            <View style={[styles.imageOptionIcon, { backgroundColor: '#E8F5E9' }]}>
+              <Feather name="camera" size={24} color="#5ECC63" />
             </View>
-            <Text style={styles.imageOptionTitle}>Câmera</Text>
-            <Text style={styles.imageOptionDescription}>
-              Tire uma foto agora
-            </Text>
+            <Text style={styles.imageOptionText}>Câmera</Text>
           </TouchableOpacity>
         </View>
-      ) : (
-        <View style={styles.imagePreviewContainer}>
-          <View style={styles.imagePreviewCard}>
-            <Image source={{ uri: selectedImage }} style={styles.imagePreview} />
-            <TouchableOpacity style={styles.imageRemoveButton} onPress={onReset}>
-              <Feather name="x" size={20} color="white" />
-            </TouchableOpacity>
+      </View>
+
+      {selectedImages.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Imagens Selecionadas</Text>
+            <View style={styles.imageBadge}>
+              <Text style={styles.imageBadgeText}>{selectedImages.length}</Text>
+            </View>
           </View>
 
-          <View style={styles.imagePreviewInfo}>
-            <Feather name="check-circle" size={24} color="#5ECC63" />
-            <Text style={styles.imagePreviewText}>Imagem selecionada com sucesso</Text>
+          <View style={styles.imagesGrid}>
+            {selectedImages.map((image) => (
+              <View key={image.id} style={styles.imageItem}>
+                <Image source={{ uri: image.uri }} style={styles.imageThumbnail} />
+                <TouchableOpacity
+                  style={styles.imageRemoveButton}
+                  onPress={() => onRemoveImage(image.id)}
+                >
+                  <Feather name="x" size={16} color="white" />
+                </TouchableOpacity>
+              </View>
+            ))}
           </View>
 
-          <TouchableOpacity style={styles.processButton} onPress={onProcess}>
-            <MaterialCommunityIcons name="brain" size={20} color="white" />
-            <Text style={styles.processButtonText}>Processar com IA</Text>
+          <TouchableOpacity style={styles.continueButton} onPress={onContinue}>
+            <Text style={styles.continueButtonText}>Continuar</Text>
+            <Feather name="arrow-right" size={20} color="white" />
           </TouchableOpacity>
         </View>
       )}
-    </View>
+
+      {selectedImages.length === 0 && (
+        <View style={styles.emptyState}>
+          <MaterialCommunityIcons name="image-off" size={64} color="#ccc" />
+          <Text style={styles.emptyStateText}>Nenhuma imagem selecionada</Text>
+          <Text style={styles.emptyStateSubtext}>
+            Adicione fotos para começar a análise
+          </Text>
+        </View>
+      )}
+    </ScrollView>
   );
 };
 
-// ============ STEP 2: PROCESSING ============
+interface ContextStepProps {
+  selectedImages: SelectedImage[];
+  globalContext: string;
+  onUpdateGlobalContext: (context: string) => void;
+  onUpdateImageContext: (imageId: string, context: string) => void;
+  onProcess: () => void;
+  onBack: () => void;
+}
+
+const ContextStep = ({
+  selectedImages,
+  globalContext,
+  onUpdateGlobalContext,
+  onUpdateImageContext,
+  onProcess,
+  onBack,
+}: ContextStepProps) => {
+  const hasAnyContext = globalContext.trim() !== '' || selectedImages.some(img => img.context?.trim());
+
+  return (
+    <ScrollView style={styles.stepContainer} showsVerticalScrollIndicator={false}>
+      <View style={styles.welcomeCard}>
+        <View style={styles.welcomeContent}>
+          <Text style={styles.welcomeTitle}>Adicionar Contexto</Text>
+          <Text style={styles.welcomeSubtitle}>
+            Forneça informações adicionais para ajudar a IA a identificar melhor os ativos
+          </Text>
+        </View>
+        <View style={styles.welcomeIconContainer}>
+          <MaterialCommunityIcons name="text-box" size={32} color="#F4A64E" />
+        </View>
+      </View>
+
+      {/* Contexto Global */}
+      <View style={styles.section}>
+        <View style={styles.contextHeaderSection}>
+          <Feather name="globe" size={20} color={themeColors.primary} />
+          <Text style={styles.sectionTitle}>Contexto Geral (Opcional)</Text>
+        </View>
+        <Text style={styles.contextHint}>
+          Informações que se aplicam a todas as imagens
+        </Text>
+        <TextInput
+          style={styles.contextInput}
+          value={globalContext}
+          onChangeText={onUpdateGlobalContext}
+          placeholder="Ex: Equipamentos da sala de TI, localização X"
+          placeholderTextColor="#999"
+          multiline
+          numberOfLines={3}
+          textAlignVertical="top"
+        />
+      </View>
+
+      {/* Contexto Individual */}
+      <View style={styles.section}>
+        <View style={styles.contextHeaderSection}>
+          <Feather name="image" size={20} color={themeColors.secondary} />
+          <Text style={styles.sectionTitle}>Contexto por Imagem (Opcional)</Text>
+        </View>
+        <Text style={styles.contextHint}>
+          Informações específicas de cada foto
+        </Text>
+
+        {selectedImages.map((image, index) => (
+          <View key={image.id} style={styles.imageContextCard}>
+            <View style={styles.imageContextHeader}>
+              <Image source={{ uri: image.uri }} style={styles.imageContextThumbnail} />
+              <View style={styles.imageContextInfo}>
+                <Text style={styles.imageContextTitle}>Imagem {index + 1}</Text>
+                <Text style={styles.imageContextSubtitle}>
+                  {image.context?.trim() ? 'Com contexto' : 'Sem contexto'}
+                </Text>
+              </View>
+            </View>
+            <TextInput
+              style={styles.imageContextInput}
+              value={image.context}
+              onChangeText={(text) => onUpdateImageContext(image.id, text)}
+              placeholder="Ex: Gato de raça Persa chamado Gilberto"
+              placeholderTextColor="#999"
+              multiline
+              numberOfLines={2}
+              textAlignVertical="top"
+            />
+          </View>
+        ))}
+      </View>
+
+      {/* Info Card */}
+      <View style={styles.infoCard}>
+        <Feather name="info" size={20} color={themeColors.secondary} />
+        <View style={styles.infoCardContent}>
+          <Text style={styles.infoCardTitle}>Dica</Text>
+          <Text style={styles.infoCardText}>
+            Quanto mais detalhes você fornecer, melhor a IA conseguirá identificar e
+            categorizar os ativos. Você pode pular esta etapa se preferir.
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.contextActions}>
+        <TouchableOpacity style={styles.backButton} onPress={onBack}>
+          <Feather name="arrow-left" size={20} color="#666" />
+          <Text style={styles.backButtonText}>Voltar</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.processButton} onPress={onProcess}>
+          <MaterialCommunityIcons name="brain" size={20} color="white" />
+          <Text style={styles.processButtonText}>Processar</Text>
+          <Feather name="arrow-right" size={20} color="white" />
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+};
+
+// ============ STEP 3: PROCESSING ============
 const ProcessingStep = () => {
   return (
-    <View style={styles.stepContainer}>
-      <View style={styles.processingContainer}>
+    <View style={styles.processingContainer}>
+      <View style={styles.processingCard}>
         <View style={styles.processingIconContainer}>
           <MaterialCommunityIcons name="brain" size={64} color="#F4A64E" />
         </View>
         <ActivityIndicator size="large" color="#F4A64E" style={styles.processingSpinner} />
-        <Text style={styles.processingTitle}>Processando Imagem...</Text>
+        <Text style={styles.processingTitle}>Processando Imagens...</Text>
         <Text style={styles.processingSubtitle}>
-          A IA está analisando a imagem e detectando os ativos
+          A IA está analisando as imagens e detectando os ativos
         </Text>
+
         <View style={styles.processingSteps}>
           <View style={styles.processingStepItem}>
-            <Feather name="check" size={16} color="#5ECC63" />
-            <Text style={styles.processingStepText}>Analisando imagem</Text>
+            <Feather name="check-circle" size={18} color="#5ECC63" />
+            <Text style={[styles.processingStepText, { color: '#5ECC63' }]}>
+              Imagens recebidas
+            </Text>
           </View>
           <View style={styles.processingStepItem}>
             <ActivityIndicator size="small" color="#F4A64E" />
-            <Text style={styles.processingStepText}>Detectando objetos</Text>
+            <Text style={styles.processingStepText}>Analisando conteúdo</Text>
           </View>
           <View style={styles.processingStepItem}>
-            <Feather name="circle" size={16} color="#ccc" />
-            <Text style={[styles.processingStepText, { color: '#ccc' }]}>Gerando atributos</Text>
+            <Feather name="circle" size={18} color="#ccc" />
+            <Text style={[styles.processingStepText, { color: '#ccc' }]}>
+              Gerando atributos
+            </Text>
           </View>
         </View>
       </View>
@@ -456,14 +704,18 @@ const ReviewStep = ({
 
   return (
     <View style={styles.stepContainer}>
-      <View style={styles.stepHeader}>
-        <View style={styles.stepIconContainer}>
-          <MaterialCommunityIcons name="clipboard-check" size={28} color="#F4A64E" />
+      <View style={styles.reviewInfoCard}>
+        <View style={styles.reviewInfoContent}>
+          <MaterialCommunityIcons name="clipboard-check" size={24} color="#F4A64E" />
+          <View style={styles.reviewInfoText}>
+            <Text style={styles.reviewInfoTitle}>
+              {assetsList.length} {assetsList.length === 1 ? 'Ativo Detectado' : 'Ativos Detectados'}
+            </Text>
+            <Text style={styles.reviewInfoSubtitle}>
+              {selectedCount} selecionado(s) para criação
+            </Text>
+          </View>
         </View>
-        <Text style={styles.stepTitle}>Revisar Ativos Detectados</Text>
-        <Text style={styles.stepSubtitle}>
-          {assetsList.length} ativo(s) encontrado(s) • {selectedCount} selecionado(s)
-        </Text>
       </View>
 
       <ScrollView style={styles.reviewList} showsVerticalScrollIndicator={false}>
@@ -479,7 +731,7 @@ const ReviewStep = ({
         ))}
       </ScrollView>
 
-      <View style={styles.stepActions}>
+      <View style={styles.reviewActions}>
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
           <Feather name="arrow-left" size={20} color="#666" />
           <Text style={styles.backButtonText}>Voltar</Text>
@@ -524,10 +776,7 @@ const AssetReviewCard = ({
         onPress={() => setExpanded(!expanded)}
         activeOpacity={0.7}
       >
-        <TouchableOpacity
-          style={styles.assetReviewCheckbox}
-          onPress={onToggle}
-        >
+        <TouchableOpacity style={styles.assetReviewCheckbox} onPress={onToggle}>
           <View style={[styles.checkbox, asset.selected && styles.checkboxChecked]}>
             {asset.selected && <Feather name="check" size={16} color="white" />}
           </View>
@@ -548,11 +797,7 @@ const AssetReviewCard = ({
           </View>
         </View>
 
-        <Feather
-          name={expanded ? 'chevron-up' : 'chevron-down'}
-          size={24}
-          color="#666"
-        />
+        <Feather name={expanded ? 'chevron-up' : 'chevron-down'} size={24} color="#666" />
       </TouchableOpacity>
 
       {expanded && (
@@ -570,15 +815,14 @@ const AssetReviewCard = ({
           </View>
 
           <View style={styles.assetReviewSection}>
-            <Text style={styles.assetReviewSectionTitle}>
-              Atributos ({attributesCount})
-            </Text>
+            <Text style={styles.assetReviewSectionTitle}>Atributos ({attributesCount})</Text>
             {Object.entries(asset.attributes).map(([attrName, attrData], idx) => (
               <View key={idx} style={styles.attributeItem}>
                 <View style={styles.attributeHeader}>
                   <Feather name="tag" size={14} color="#F4A64E" />
                   <Text style={styles.attributeName}>{attrName}</Text>
                 </View>
+
                 <View style={styles.attributeValue}>
                   <Text style={styles.attributeValueText}>
                     {formatAttributeValue(attrData)}
@@ -587,6 +831,42 @@ const AssetReviewCard = ({
                     <Text style={styles.attributeTypeText}>{attrData.type}</Text>
                   </View>
                 </View>
+
+                {(attrData.type === 'selection' || attrData.type === 'multiselection') &&
+                  attrData.options &&
+                  attrData.options.length > 0 && (
+                    <View style={styles.attributeOptions}>
+                      <Text style={styles.attributeOptionsLabel}>Opções disponíveis:</Text>
+                      <View style={styles.attributeOptionsList}>
+                        {attrData.options.map((option, optIdx) => {
+                          const isSelected =
+                            attrData.type === 'selection'
+                              ? option === attrData.value
+                              : attrData.value.split(',').map((v: string) => v.trim()).includes(option);
+
+                          return (
+                            <View
+                              key={optIdx}
+                              style={[
+                                styles.attributeOptionChip,
+                                isSelected && styles.attributeOptionChipSelected,
+                              ]}
+                            >
+                              {isSelected && <Feather name="check" size={12} color={themeColors.primary} />}
+                              <Text
+                                style={[
+                                  styles.attributeOptionText,
+                                  isSelected && styles.attributeOptionTextSelected,
+                                ]}
+                              >
+                                {option}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
               </View>
             ))}
           </View>
@@ -603,8 +883,8 @@ const formatAttributeValue = (attrData: AttributeData): string => {
     value += ` ${attrData.unit}`;
   }
 
-  if (attrData.type === 'timemetric' && attrData.timeUnit) {
-    value += ` ${attrData.timeUnit}`;
+  if (attrData.type === 'timemetric' && attrData.timeunit) {
+    value += ` ${attrData.timeunit}`;
   }
 
   if (attrData.type === 'boolean') {
@@ -615,36 +895,44 @@ const formatAttributeValue = (attrData: AttributeData): string => {
     value = new Date(attrData.value).toLocaleDateString('pt-BR');
   }
 
+  if (attrData.type === 'selection') {
+    value = `Selecionado: ${attrData.value}`;
+  }
+
+  if (attrData.type === 'multiselection') {
+    const selected = attrData.value.split(',').map((v: string) => v.trim());
+    value = `Selecionados: ${selected.join(', ')}`;
+  }
+
   return value;
 };
 
-// ============ STEP 4: CREATING ============
+// ============ STEP 5: CREATING ============
 const CreatingStep = () => {
   return (
-    <View style={styles.stepContainer}>
-      <View style={styles.processingContainer}>
+    <View style={styles.processingContainer}>
+      <View style={styles.processingCard}>
         <View style={styles.processingIconContainer}>
           <MaterialCommunityIcons name="package-variant" size={64} color="#5ECC63" />
         </View>
         <ActivityIndicator size="large" color="#5ECC63" style={styles.processingSpinner} />
         <Text style={styles.processingTitle}>Criando Ativos...</Text>
         <Text style={styles.processingSubtitle}>
-          Estamos criando os ativos e seus atributos
+          Estamos criando os ativos e seus atributos no sistema
         </Text>
       </View>
     </View>
   );
 };
 
-// ============ STEP 5: SUCCESS ============
 interface SuccessStepProps {
   onFinish: () => void;
 }
 
 const SuccessStep = ({ onFinish }: SuccessStepProps) => {
   return (
-    <View style={styles.stepContainer}>
-      <View style={styles.successContainer}>
+    <View style={styles.successContainer}>
+      <View style={styles.successCard}>
         <View style={styles.successIconContainer}>
           <Feather name="check-circle" size={80} color="#5ECC63" />
         </View>
@@ -653,24 +941,23 @@ const SuccessStep = ({ onFinish }: SuccessStepProps) => {
           Os ativos foram criados com sucesso através da análise de IA
         </Text>
         <TouchableOpacity style={styles.successButton} onPress={onFinish}>
+          <MaterialCommunityIcons name="plus" size={20} color="white" />
           <Text style={styles.successButtonText}>Criar Mais Ativos</Text>
-          <Feather name="plus" size={20} color="white" />
         </TouchableOpacity>
       </View>
     </View>
   );
 };
 
-// ============ CAMERA MODAL ============
 interface CameraModalProps {
   visible: boolean;
   onClose: () => void;
-  onCapture: (photoBase64: string) => void;
+  onCapture: (photoBase64: string, photoUri: string) => void;
 }
 
 const CameraModal = ({ visible, onClose, onCapture }: CameraModalProps) => {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [cameraRef, setCameraRef] = useState<CameraView | null>(null);
+  const [cameraRef, setCameraRef] = useState<any>(null);
   const [capturing, setCapturing] = useState(false);
 
   useEffect(() => {
@@ -692,7 +979,7 @@ const CameraModal = ({ visible, onClose, onCapture }: CameraModalProps) => {
           quality: 0.8,
           base64: true,
         });
-        onCapture(photo.base64!);
+        onCapture(photo.base64, photo.uri);
       } catch (error) {
         console.error('Erro ao capturar foto:', error);
         Alert.alert('Erro', 'Não foi possível tirar a foto');
@@ -719,11 +1006,7 @@ const CameraModal = ({ visible, onClose, onCapture }: CameraModalProps) => {
           </View>
         ) : (
           <>
-            <CameraView
-                style={styles.camera}
-                facing='back'
-                ref={(ref) => setCameraRef(ref)}
-            >
+            <CameraView style={styles.camera} facing="back" ref={(ref) => setCameraRef(ref)}>
               <View style={styles.cameraHeader}>
                 <TouchableOpacity style={styles.cameraCloseButton} onPress={onClose}>
                   <Feather name="x" size={24} color="white" />
@@ -754,23 +1037,26 @@ const CameraModal = ({ visible, onClose, onCapture }: CameraModalProps) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: themeColors.background,
   },
-
-  // Header
   header: {
-    backgroundColor: 'white',
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    padding: 20,
+    paddingTop: 20,
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  headerIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTextContainer: {
     flex: 1,
@@ -778,132 +1064,298 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: 'white',
     marginBottom: 2,
   },
   headerSubtitle: {
     fontSize: 13,
-    color: '#666',
+    color: 'rgba(255, 255, 255, 0.8)',
   },
-
-  // Step Container
-  stepContainer: {
+  main: {
+    backgroundColor: themeColors.mainBackground,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     flex: 1,
     padding: 20,
   },
-  stepHeader: {
-    alignItems: 'center',
-    marginBottom: 24,
+  stepContainer: {
+    flex: 1,
   },
-  stepIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#FFF3E0',
-    justifyContent: 'center',
+  welcomeCard: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  stepTitle: {
-    fontSize: 24,
+  welcomeContent: {
+    flex: 1,
+  },
+  welcomeTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-    textAlign: 'center',
+    color: themeColors.dark,
+    marginBottom: 4,
   },
-  stepSubtitle: {
+  welcomeSubtitle: {
     fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
+    color: themeColors.light,
     lineHeight: 20,
   },
-
-  // Image Selection
-  imageSelectionContainer: {
-    flex: 1,
-    gap: 16,
-    justifyContent: 'center',
+  welcomeIconContainer: {
+    marginLeft: 16,
   },
-  imageOptionCard: {
-    backgroundColor: 'white',
-    padding: 32,
-    borderRadius: 16,
+  section: {
+    marginBottom: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: themeColors.dark,
+    marginBottom: 12,
+  },
+  imageBadge: {
+    backgroundColor: themeColors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  imageBadgeText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  imageOptionsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  imageOptionButton: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  imageOptionIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  imageOptionText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: themeColors.dark,
+  },
+  imagesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 16,
+  },
+  imageItem: {
+    position: 'relative',
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  imageThumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  imageRemoveButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  continueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: themeColors.primary,
+    padding: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  continueButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    marginTop: 20,
+  },
+  emptyStateText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#999',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+
+  // Context Step
+  contextHeaderSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  contextHint: {
+    fontSize: 13,
+    color: themeColors.light,
+    marginBottom: 12,
+    fontStyle: 'italic',
+  },
+  contextInput: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
     borderColor: '#E0E0E0',
+    fontSize: 14,
+    color: themeColors.dark,
+    minHeight: 80,
+    textAlignVertical: 'top',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
   },
-  imageOptionIcon: {
-    marginBottom: 16,
+  imageContextCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  imageOptionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  imageOptionDescription: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-  },
-
-  // Image Preview
-  imagePreviewContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 24,
-  },
-  imagePreviewCard: {
-    position: 'relative',
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-  },
-  imagePreview: {
-    width: 300,
-    height: 300,
-    borderRadius: 14,
-  },
-  imageRemoveButton: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  imagePreviewInfo: {
+  imageContextHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    marginBottom: 12,
+    gap: 12,
+  },
+  imageContextThumbnail: {
+    width: 60,
+    height: 60,
     borderRadius: 8,
   },
-  imagePreviewText: {
-    fontSize: 14,
-    color: '#2E7D32',
+  imageContextInfo: {
+    flex: 1,
+  },
+  imageContextTitle: {
+    fontSize: 16,
     fontWeight: '600',
+    color: themeColors.dark,
+    marginBottom: 4,
+  },
+  imageContextSubtitle: {
+    fontSize: 13,
+    color: themeColors.light,
+  },
+  imageContextInput: {
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    fontSize: 14,
+    color: themeColors.dark,
+    minHeight: 60,
+    textAlignVertical: 'top',
+  },
+  infoCard: {
+    flexDirection: 'row',
+    backgroundColor: '#E3F2FD',
+    padding: 16,
+    borderRadius: 12,
+    gap: 12,
+    marginBottom: 20,
+  },
+  infoCardContent: {
+    flex: 1,
+  },
+  infoCardTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: themeColors.secondary,
+    marginBottom: 4,
+  },
+  infoCardText: {
+    fontSize: 13,
+    color: themeColors.dark,
+    lineHeight: 18,
+  },
+  contextActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
   },
   processButton: {
+    flex: 2,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#F4A64E',
-    paddingHorizontal: 32,
-    paddingVertical: 16,
+    backgroundColor: themeColors.success,
+    padding: 16,
     borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   processButtonText: {
     color: 'white',
@@ -916,26 +1368,38 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  processingCard: {
+    backgroundColor: 'white',
+    borderRadius: 16,
     padding: 40,
+    alignItems: 'center',
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
   processingIconContainer: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   processingSpinner: {
-    marginVertical: 24,
+    marginVertical: 20,
   },
   processingTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+    color: themeColors.dark,
     marginBottom: 8,
+    textAlign: 'center',
   },
   processingSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: themeColors.light,
     textAlign: 'center',
     lineHeight: 20,
-    marginBottom: 32,
+    marginBottom: 24,
   },
   processingSteps: {
     width: '100%',
@@ -945,17 +1409,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: 'white',
-    padding: 16,
+    padding: 12,
+    backgroundColor: '#F8F9FA',
     borderRadius: 8,
   },
   processingStepText: {
     fontSize: 14,
-    color: '#333',
+    color: themeColors.dark,
     fontWeight: '500',
   },
 
   // Review
+  reviewInfoCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  reviewInfoContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reviewInfoText: {
+    flex: 1,
+  },
+  reviewInfoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: themeColors.dark,
+    marginBottom: 2,
+  },
+  reviewInfoSubtitle: {
+    fontSize: 14,
+    color: themeColors.light,
+  },
   reviewList: {
     flex: 1,
     marginBottom: 16,
@@ -967,9 +1460,14 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#E0E0E0',
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   assetReviewCardSelected: {
-    borderColor: '#F4A64E',
+    borderColor: themeColors.primary,
     backgroundColor: '#FFFBF5',
   },
   assetReviewHeader: {
@@ -991,8 +1489,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   checkboxChecked: {
-    backgroundColor: '#F4A64E',
-    borderColor: '#F4A64E',
+    backgroundColor: themeColors.primary,
+    borderColor: themeColors.primary,
   },
   assetReviewInfo: {
     flex: 1,
@@ -1000,12 +1498,12 @@ const styles = StyleSheet.create({
   assetReviewName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: themeColors.dark,
     marginBottom: 4,
   },
   assetReviewDescription: {
     fontSize: 14,
-    color: '#666',
+    color: themeColors.light,
     marginBottom: 8,
   },
   assetReviewMeta: {
@@ -1033,7 +1531,7 @@ const styles = StyleSheet.create({
   assetReviewSectionTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#333',
+    color: themeColors.dark,
     marginBottom: 4,
   },
   assetReviewInput: {
@@ -1043,8 +1541,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0E0E0',
     fontSize: 14,
-    color: '#333',
-    minHeight: 60,
+    color: themeColors.dark,
+    minHeight: 80,
     textAlignVertical: 'top',
   },
   attributeItem: {
@@ -1062,7 +1560,7 @@ const styles = StyleSheet.create({
   attributeName: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#333',
+    color: themeColors.dark,
   },
   attributeValue: {
     flexDirection: 'row',
@@ -1085,9 +1583,50 @@ const styles = StyleSheet.create({
     color: '#1976D2',
     fontWeight: '600',
   },
+  attributeOptions: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  attributeOptionsLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: themeColors.mid,
+    marginBottom: 8,
+  },
+  attributeOptionsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  attributeOptionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F0F0F0',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  attributeOptionChipSelected: {
+    backgroundColor: '#FFF3E0',
+    borderColor: themeColors.primary,
+  },
+  attributeOptionText: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  attributeOptionTextSelected: {
+    color: themeColors.primary,
+    fontWeight: '600',
+  },
 
   // Actions
-  stepActions: {
+  reviewActions: {
     flexDirection: 'row',
     gap: 12,
   },
@@ -1115,8 +1654,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderRadius: 12,
-    backgroundColor: '#5ECC63',
+    backgroundColor: themeColors.success,
     gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   createButtonDisabled: {
     backgroundColor: '#ccc',
@@ -1133,20 +1677,31 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  successCard: {
+    backgroundColor: 'white',
+    borderRadius: 16,
     padding: 40,
+    alignItems: 'center',
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
   successIconContainer: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   successTitle: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    color: themeColors.dark,
     marginBottom: 12,
   },
   successSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: themeColors.light,
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 32,
@@ -1155,7 +1710,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#F4A64E',
+    backgroundColor: themeColors.primary,
     paddingHorizontal: 32,
     paddingVertical: 16,
     borderRadius: 12,
@@ -1232,7 +1787,7 @@ const styles = StyleSheet.create({
     marginVertical: 24,
   },
   cameraPermissionButton: {
-    backgroundColor: '#F4A64E',
+    backgroundColor: themeColors.primary,
     paddingHorizontal: 32,
     paddingVertical: 16,
     borderRadius: 12,

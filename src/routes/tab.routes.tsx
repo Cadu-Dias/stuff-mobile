@@ -37,19 +37,19 @@ const TabRoutes = () => {
                 }}
             />
             <Tab.Screen 
-                name='Profile'
-                component={SCREENS.ProfileScreen}
-                options={{
-                    tabBarIcon: ({ color, size }) => <Feather name='user' color={color} size={size} />,
-                    tabBarLabel: 'Conta'
-                }}
-            />
-            <Tab.Screen 
                 name='AI'
                 component={SCREENS.AIAssetCreationScreen}
                 options={{
                     tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name='robot' color={color} size={size} />,
                     tabBarLabel: 'IA'
+                }}
+            />
+            <Tab.Screen 
+                name='Profile'
+                component={SCREENS.ProfileScreen}
+                options={{
+                    tabBarIcon: ({ color, size }) => <Feather name='user' color={color} size={size} />,
+                    tabBarLabel: 'Conta'
                 }}
             />
         </Tab.Navigator>
